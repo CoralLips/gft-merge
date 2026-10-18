@@ -9,10 +9,10 @@ description: 把多个 AI 工具（Claude Code、Codex）的会话合进池子�
 
 ## 打开
 
-在 GFT-Merge 目录运行：
+运行：
 
 ```bash
-node cli.mjs open
+npx gft-merge
 ```
 
 然后告诉用户页面地址（默认 `http://127.0.0.1:4319`）。不要替用户拖动或送内容。

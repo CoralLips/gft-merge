@@ -252,8 +252,9 @@ export function createClaudeTool({
   sdk = defaultSdk,
   desktopDir = defaultDesktopDir(),
   projectsDir = defaultProjectsDir(),
-  open = openLink,
   executable = appClaudeCode(),
+  // Without the Claude app nothing handles claude:// links; opening one would only raise an error.
+  open = executable ? openLink : () => {},
 } = {}) {
   // Every Claude Code this tool starts runs without the parent session's
   // variables, and is the Claude app's own copy when there is one.

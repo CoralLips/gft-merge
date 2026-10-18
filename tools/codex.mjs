@@ -218,7 +218,8 @@ const TURN_MS = 15 * 60 * 1000;
 export function createCodexTool({
   connect = connectAppServer,
   retryMs = 500,
-  open = openLink,
+  // Without the Codex app nothing handles codex:// links; opening one would only raise an error.
+  open = appCodex() || existsSync('/Applications/Codex.app') ? openLink : () => {},
 } = {}) {
   // One app-server starts at a time from here: two starting together clash over
   // Codex's state database. A clash with the Codex app starting up is retried once.
