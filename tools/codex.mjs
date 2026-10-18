@@ -2,7 +2,10 @@
 // start one whose first message is a pool. That message is a real turn, so
 // Codex lists the new session first, as if the person had written it.
 import { spawn } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { open as openFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { BRIEF, COMPRESS } from '../home.mjs';
 import { openLink } from '../openLink.mjs';
@@ -14,9 +17,36 @@ const dateOf = value =>
     ? new Date(value < 1e12 ? value * 1000 : value).toISOString()
     : value || null;
 
+/**
+ * The codex the Codex app ships and keeps current, newest first; null without
+ * the app. The one on the PATH can be older and list older models.
+ */
+export function appCodex(
+  directory = path.join(
+    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+    'OpenAI',
+    'Codex',
+    'bin',
+  ),
+) {
+  if (process.platform !== 'win32') return null;
+  let builds = [];
+  try {
+    builds = readdirSync(directory);
+  } catch {
+    return null;
+  }
+  return (
+    builds
+      .map(build => path.join(directory, build, 'codex.exe'))
+      .filter(file => existsSync(file))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null
+  );
+}
+
 /** A short-lived app-server connection. Requests from the server (approvals) are refused. */
 export async function connectAppServer({
-  binary = process.env.GFT_CODEX_BIN || 'codex',
+  binary = process.env.GFT_CODEX_BIN || appCodex() || 'codex',
   timeoutMs = 30000,
 } = {}) {
   const child = spawn(binary, ['app-server', '--listen', 'stdio://'], {

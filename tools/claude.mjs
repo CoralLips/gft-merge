@@ -11,6 +11,7 @@
 // Claude started through Remote Control, which the app keeps under Threads
 // rather than the session list. Sessions started in the terminal come from the
 // SDK and are marked CLI.
+import { existsSync, readdirSync } from 'node:fs';
 import { open, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,14 +29,42 @@ export const childEnvironment = (env = process.env) =>
 const dateOf = value => (typeof value === 'number' ? new Date(value).toISOString() : value || null);
 
 /** Where the Claude app keeps its index of Code sessions. */
-function defaultDesktopDir() {
-  const base =
-    process.platform === 'win32'
-      ? process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-      : process.platform === 'darwin'
-        ? path.join(os.homedir(), 'Library', 'Application Support')
-        : process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(base, 'Claude', 'claude-code-sessions');
+const appDataBase = () =>
+  process.platform === 'win32'
+    ? process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
+    : process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const defaultDesktopDir = () => path.join(appDataBase(), 'Claude', 'claude-code-sessions');
+
+/**
+ * The Claude Code the Claude app ships, newest version; null without the app.
+ * The SDK's own copy is older and knows fewer models, so the app's is used.
+ */
+export function appClaudeCode(directory = path.join(appDataBase(), 'Claude', 'claude-code')) {
+  const parts = version => version.split('.').map(Number);
+  const newer = (a, b) => {
+    const [x, y] = [parts(a), parts(b)];
+    for (let i = 0; i < Math.max(x.length, y.length); i++)
+      if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0);
+    return 0;
+  };
+  const list = dir => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
+  for (const version of list(directory)
+    .filter(name => /^\d+(\.\d+)*$/.test(name))
+    .sort(newer))
+    for (const build of list(path.join(directory, version)))
+      for (const name of ['claude.exe', 'claude']) {
+        const file = path.join(directory, version, build, name);
+        if (existsSync(file)) return file;
+      }
+  return null;
 }
 const defaultProjectsDir = () =>
   path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
@@ -209,7 +238,7 @@ async function run(api, text, options) {
   let result = null;
   for await (const message of api.query({
     prompt: text + BRIEF,
-    options: { ...options, env: childEnvironment(), settingSources: [], tools: [], maxTurns: 1 },
+    options: { ...options, settingSources: [], tools: [], maxTurns: 1 },
   })) {
     sessionId ||= message.session_id || null;
     if (message.type === 'result') result = message;
@@ -224,7 +253,15 @@ export function createClaudeTool({
   desktopDir = defaultDesktopDir(),
   projectsDir = defaultProjectsDir(),
   open = openLink,
+  executable = appClaudeCode(),
 } = {}) {
+  // Every Claude Code this tool starts runs without the parent session's
+  // variables, and is the Claude app's own copy when there is one.
+  const child = () => ({
+    env: childEnvironment(),
+    ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
+  });
+
   /** Brings a session the SDK wrote into the Claude app, which opens it. */
   const reveal = sessionId => open(`claude://resume?session=${sessionId}`);
 
@@ -263,7 +300,7 @@ export function createClaudeTool({
     /** Starts a session in `cwd` whose first message is `text`. */
     async create({ cwd, title, text }) {
       const api = await sdk();
-      const id = await run(api, text, { cwd });
+      const id = await run(api, text, { cwd, ...child() });
       await api.renameSession(id, title, { dir: cwd }).catch(() => {});
       reveal(id);
       return {
@@ -290,12 +327,16 @@ export function createClaudeTool({
       const session = api.query({
         // A prompt that never sends anything: the model list needs no message.
         prompt: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) },
-        options: { env: childEnvironment(), settingSources: ['user'], persistSession: false },
+        options: { ...child(), settingSources: ['user'], persistSession: false },
       });
       try {
+        // The default's description starts with the model it stands for, as in "Opus 5.5 · …".
         return (await session.supportedModels()).map(model =>
           model.value === 'default'
-            ? { id: '', name: '默认' }
+            ? {
+                id: '',
+                name: `默认（${model.description?.split(' · ')[0] || model.resolvedModel}）`,
+              }
             : { id: model.value, name: model.displayName },
         );
       } finally {
@@ -311,7 +352,7 @@ export function createClaudeTool({
         prompt: COMPRESS + text,
         options: {
           ...(model ? { model } : {}),
-          env: childEnvironment(),
+          ...child(),
           settingSources: [],
           tools: [],
           maxTurns: 1,
