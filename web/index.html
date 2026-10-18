@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GFT-merge</title>
+    <script>
+      // Apply the saved theme before the first paint, so the page never flashes the other one.
+      try {
+        const theme = localStorage.getItem('gft-merge:theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <section id="top" aria-label="各工具的会话（按住桶之间的空隙左右拖动）">
+      <div id="rail"></div>
+    </section>
+    <section id="bottom">
+      <aside id="list" aria-label="池子">
+        <button id="add-pool" type="button">＋ 新池子</button>
+        <ul id="pools"></ul>
+      </aside>
+      <div id="workspace" aria-label="工作区">
+        <div id="gridlines" aria-hidden="true"></div>
+        <svg id="preview" hidden width="40" height="40" aria-hidden="true">
+          <circle cx="20" cy="20" r="16" />
+        </svg>
+        <div id="out-zone">
+          <span class="in">拖进中间＝融合 · 往上拖＝注入 · 拖到左边的池子＝移过去</span
+          ><span class="out">松手即移出池子</span>
+        </div>
+      </div>
+    </section>
+    <details id="menu">
+      <summary aria-label="设置" title="设置">
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          aria-hidden="true"
+        >
+          <path
+            d="m9.5 3-.5 2a8 8 0 0 0-2 1.2L5 5.6 3 9l1.5 1.4a8 8 0 0 0 0 2.4L3 14.2l2 3.4 2-.6a8 8 0 0 0 2 1.2l.5 2h4l.5-2a8 8 0 0 0 2-1.2l2 .6 2-3.4-1.5-1.4a8 8 0 0 0 0-2.4L20 9l-2-3.4-2 .6a8 8 0 0 0-2-1.2l-.5-2Z"
+          />
+          <circle cx="11.5" cy="11.6" r="3.1" />
+        </svg>
+      </summary>
+      <div class="menu-items">
+        <div class="segment">
+          <span>外观</span>
+          <div role="group" aria-label="外观" id="theme-group"></div>
+        </div>
+        <div class="segment">
+          <span>连接的工具</span>
+          <div role="group" aria-label="连接的工具" id="tool-group"></div>
+        </div>
+      </div>
+    </details>
+    <div id="ghost" hidden></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

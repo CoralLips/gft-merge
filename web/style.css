@@ -1,0 +1,519 @@
+/* Light by default; dark follows the system unless a theme is chosen in settings. */
+:root {
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --text: #22201c;
+  --muted: #8a867d;
+  --line: #e4e1da;
+  --ink: #3b3934;
+  --accent: #3a6ea5;
+  --danger: #c0533a;
+  --claude: #d97757;
+  --codex: #c9c5bc;
+  --gap: 32px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #191816;
+    --panel: #21201d;
+    --text: #ece9e2;
+    --muted: #8f8a80;
+    --line: #34322d;
+    --ink: #d8d4cb;
+    --accent: #7aa6d6;
+    --codex: #b8b4ab;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #191816;
+  --panel: #21201d;
+  --text: #ece9e2;
+  --muted: #8f8a80;
+  --line: #34322d;
+  --ink: #d8d4cb;
+  --accent: #7aa6d6;
+  --codex: #b8b4ab;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.5 system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
+  display: grid;
+  grid-template-rows: 48% 52%;
+  user-select: none;
+  overflow: hidden;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+.meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---- Top: tool buckets on a rail, panned by the gaps ---- */
+#top {
+  overflow: hidden;
+  cursor: grab;
+  border-bottom: 1px solid var(--line);
+  padding: 16px 0 12px;
+  touch-action: none;
+}
+#top.panning {
+  cursor: grabbing;
+}
+#rail {
+  display: flex;
+  gap: var(--gap);
+  height: 100%;
+  padding: 0 var(--gap);
+  width: max-content;
+  will-change: transform;
+}
+.bucket {
+  position: relative;
+  width: 300px;
+  height: 100%;
+  background: var(--panel);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+  overflow: hidden;
+}
+.bucket header {
+  height: 60px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+.bucket header .count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 12px;
+}
+.bucket ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+  touch-action: pan-y;
+}
+.bucket .empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.session {
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: grab;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  position: relative;
+}
+.session:hover {
+  background: var(--bg);
+}
+.session .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drop hints, shown only while something from the workspace is carried up */
+body.carrying-up .bucket::after {
+  content: attr(data-drop);
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--panel);
+  background: var(--ink);
+}
+.target::after {
+  display: flex !important;
+}
+
+/* ---- Bottom: pool list and workspace ---- */
+#bottom {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  min-height: 0;
+}
+#list {
+  border-right: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+#list > button {
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+/* Settings: a gear at the top right with a drop-down, as in GFT Map */
+#menu {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 30;
+  font-size: 13px;
+  color: var(--muted);
+}
+#menu summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+#menu summary::-webkit-details-marker {
+  display: none;
+}
+#menu summary:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+.menu-items {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 5px 20px #0002;
+}
+.segment {
+  padding: 7px 9px 10px;
+}
+.segment + .segment {
+  border-top: 1px solid var(--line);
+}
+.segment > span {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+.segment > div {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+.segment button {
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.segment button[aria-pressed='true'] {
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 1px 3px #0001;
+}
+#pools {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: grid;
+  /* Long names are cut with an ellipsis instead of widening the list. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  align-content: start;
+}
+.pool-item {
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.pool-item.selected {
+  background: var(--panel);
+  font-weight: 600;
+}
+.pool-item .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pool-item .edit {
+  visibility: hidden;
+  border: none;
+  background: none;
+  padding: 0 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pool-item:hover .edit {
+  visibility: visible;
+}
+.pool-item.target {
+  outline: 1.5px solid var(--ink);
+}
+.pool-item.target::after {
+  content: '松手：移到这个池子';
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel);
+  background: var(--ink);
+}
+
+/* ---- Workspace: monochrome dashed vector balls on a grid ---- */
+#workspace {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+}
+#workspace.receiving {
+  background: var(--panel);
+}
+#gridlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+body.dragging #gridlines {
+  opacity: 1;
+}
+.cell {
+  position: absolute;
+  border: 1px dashed var(--line);
+}
+.cell.middle {
+  border-color: var(--muted);
+}
+#workspace.fusing .cell.middle {
+  border-style: solid;
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+#preview[hidden] {
+  display: none;
+}
+#preview {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+#preview circle {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.ball circle {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    left 0.18s ease-out,
+    top 0.18s ease-out;
+}
+.item.lifted {
+  transition: none;
+  z-index: 5;
+  cursor: grabbing;
+  pointer-events: none;
+}
+.item .label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 120px;
+  height: 120px;
+  border: 1.5px dashed var(--line);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.fused {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.fused .ball {
+  cursor: grab;
+  touch-action: none;
+}
+.fused.lifted .ball {
+  opacity: 0.3;
+}
+.fused .caption {
+  font-size: 12px;
+  color: var(--muted);
+}
+.members {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.members .chip {
+  cursor: grab;
+  touch-action: none;
+}
+.busy {
+  opacity: 0.5;
+}
+#out-zone {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+#out-zone .out,
+body.removing #out-zone .in {
+  display: none;
+}
+body.carrying-small #out-zone {
+  display: flex;
+}
+body.carrying-small.removing #out-zone {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font-weight: 600;
+}
+body.removing #out-zone .out {
+  display: inline;
+}
+
+#ghost[hidden] {
+  display: none !important;
+}
+#ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 6px 14px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 20;
+  max-width: 80vw;
+}
+#toast.show {
+  opacity: 0.92;
+}
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  #gridlines,
+  #toast {
+    transition: none;
+  }
+}
