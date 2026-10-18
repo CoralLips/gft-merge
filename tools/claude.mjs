@@ -290,9 +290,8 @@ export function createClaudeTool({
     async models() {
       const api = await sdk();
       const session = api.query({
-        prompt: (async function* () {
-          await new Promise(() => {});
-        })(),
+        // A prompt that never sends anything: the model list needs no message.
+        prompt: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) },
         options: { env: childEnvironment(), settingSources: ['user'], persistSession: false },
       });
       try {
