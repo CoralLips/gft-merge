@@ -192,7 +192,7 @@ body.carrying-up .bucket::after {
   padding: 6px 10px;
   cursor: pointer;
 }
-/* Settings: a gear at the top right with a drop-down, as in GFT Map */
+/* Settings: a gear at the top right with a drop-down, as in GFT-Map */
 #menu {
   position: fixed;
   top: 10px;

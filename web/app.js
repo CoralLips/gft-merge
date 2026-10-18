@@ -1,4 +1,4 @@
-// GFT-merge page. Regions own their gestures: the tool buckets above belong to
+// GFT-Merge page. Regions own their gestures: the tool buckets above belong to
 // the tools, the pool list and workspace below belong to us. The workspace is
 // a grid: a session dropped in waits in a cell; dragged into the middle it is
 // fused. Dragging anything up injects exactly what was dragged: one waiting

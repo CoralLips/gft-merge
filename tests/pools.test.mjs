@@ -35,6 +35,7 @@ test('合并只追加新消息，跳过已收过的与注入标记；新会话�
       message('a', 'user', '先定方案', '2026-10-16T10:00:00Z'),
       message('b', 'assistant', '方案是 A', '2026-10-16T10:01:00Z'),
       message('c', 'user', `${MARKER}别处注入来的`, '2026-10-16T10:02:00Z'),
+      message('e', 'user', '〔GFT-merge〕改名前注入来的', '2026-10-16T10:02:30Z'),
       message('d', 'user', '继续', '2026-10-16T10:03:00Z'),
     ]);
     assert.equal(again.added, 1);

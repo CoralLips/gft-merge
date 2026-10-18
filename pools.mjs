@@ -17,6 +17,8 @@ export const sessionKey = ({ tool, id }) => `${tool}:${id}`;
 const messageKey = message => sessionKey({ tool: message.tool, id: message.sessionId });
 
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
+/** Text GFT-Merge sent into a session, including that sent before the name was capitalised. */
+const sentByUs = text => text.toLowerCase().startsWith(MARKER.toLowerCase());
 
 /** Pools written before sessions could wait are read as fused, with a per-session delivery mark. */
 function upgrade(pool) {
@@ -122,7 +124,7 @@ export function createPools({ home = homeDir() } = {}) {
 
   /**
    * Adds a session (waiting, unless `place` says otherwise) and its new messages;
-   * known message IDs and text GFT-merge injected earlier are skipped.
+   * known message IDs and text GFT-Merge injected earlier are skipped.
    */
   const merge = (id, session, messages, place = {}) =>
     serially(id, async () => {
@@ -142,7 +144,7 @@ export function createPools({ home = homeDir() } = {}) {
         });
       const known = await knownIds(id, session);
       const fresh = messages
-        .filter(message => !known.has(message.id) && !message.text.startsWith(MARKER))
+        .filter(message => !known.has(message.id) && !sentByUs(message.text))
         .map(message => ({
           seq: pool.nextSeq++,
           tool,

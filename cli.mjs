@@ -17,7 +17,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const portTaken = () =>
   new Error(
-    `端口 ${port} 已被其他程序占用，GFT-merge 没有启动。请换一个端口，例如：node cli.mjs open --port ${port + 10}`,
+    `端口 ${port} 已被其他程序占用，GFT-Merge 没有启动。请换一个端口，例如：node cli.mjs open --port ${port + 10}`,
   );
 
 /** Whether anything listens on the port, without speaking HTTP to it. */
@@ -34,7 +34,7 @@ const listening = () =>
     });
   });
 
-/** 'ours' when GFT-merge answers on the port, 'other' when something else holds it, else 'free'. */
+/** 'ours' when GFT-Merge answers on the port, 'other' when something else holds it, else 'free'. */
 async function probe() {
   try {
     const response = await fetch(`${url}/api/state`, { signal: AbortSignal.timeout(1500) });
@@ -61,7 +61,7 @@ const commands = {
       throw error.code === 'EADDRINUSE' ? portTaken() : error;
     });
     await writeJson(serviceFile, { pid: process.pid, port, startedAt: new Date().toISOString() });
-    console.log(`GFT-merge: ${url}`);
+    console.log(`GFT-Merge: ${url}`);
   },
 
   async open() {
@@ -82,7 +82,7 @@ const commands = {
         throw new Error(`启动失败，请查看 ${path.join(homeDir(), 'service.log')}`);
     }
     openBrowser();
-    console.log(`GFT-merge 已打开：${url}`);
+    console.log(`GFT-Merge 已打开：${url}`);
   },
 
   /** Stops the process this data directory started, as recorded when it began serving. */
@@ -98,11 +98,11 @@ const commands = {
     };
     if (!service?.pid || !alive(service.pid)) {
       await rm(serviceFile, { force: true });
-      return console.log('GFT-merge 没有在运行。');
+      return console.log('GFT-Merge 没有在运行。');
     }
     process.kill(service.pid);
     await rm(serviceFile, { force: true });
-    console.log('GFT-merge 已停止。');
+    console.log('GFT-Merge 已停止。');
   },
 
   async status() {

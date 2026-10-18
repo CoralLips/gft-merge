@@ -1,15 +1,15 @@
 ---
 name: gft-merge
-description: 把多个 AI 工具（Claude Code、Codex）的会话合进池子，再拿池子在任一工具里新建会话接着干。用户说“合并会话”“把那边的讨论带过来”“交接给 Codex/Claude”“打开 GFT-merge”时使用。
+description: 把多个 AI 工具（Claude Code、Codex）的会话合进池子，再拿池子在任一工具里新建会话接着干。用户说“合并会话”“把那边的讨论带过来”“交接给 Codex/Claude”“打开 GFT-Merge”时使用。
 ---
 
-# GFT-merge
+# GFT-Merge
 
 本地小工具：上面是各工具的会话，下面是池子。往下拖合并，往上拖到某个工具区就在那里新建会话。
 
 ## 打开
 
-在 GFT-merge 目录运行：
+在 GFT-Merge 目录运行：
 
 ```bash
 node cli.mjs open

@@ -1,4 +1,4 @@
-// Local HTTP service for the GFT-merge page.
+// Local HTTP service for the GFT-Merge page.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';

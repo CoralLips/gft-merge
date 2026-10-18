@@ -201,7 +201,7 @@ async function defaultSdk() {
   try {
     return await import('@anthropic-ai/claude-agent-sdk');
   } catch {
-    throw failure('缺少 Claude Code 读取组件，请在 GFT-merge 目录运行 npm install。');
+    throw failure('缺少 Claude Code 读取组件，请在 GFT-Merge 目录运行 npm install。');
   }
 }
 

@@ -1,4 +1,4 @@
-// Where GFT-merge keeps its files, and small helpers to read and write them safely.
+// Where GFT-Merge keeps its files, and small helpers to read and write them safely.
 import { mkdir, readFile, rename, writeFile, appendFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,8 +6,8 @@ import path from 'node:path';
 export const homeDir = () =>
   path.resolve(process.env.GFT_MERGE_HOME || path.join(os.homedir(), '.gft-merge'));
 
-/** Text placed at the start of everything GFT-merge writes into a session. */
-export const MARKER = '〔GFT-merge〕';
+/** Text placed at the start of everything GFT-Merge writes into a session. */
+export const MARKER = '〔GFT-Merge〕';
 
 export async function readJson(file, fallback = null) {
   try {

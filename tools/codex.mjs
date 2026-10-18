@@ -103,7 +103,7 @@ export async function connectAppServer({
   };
   try {
     await request('initialize', {
-      clientInfo: { name: 'gft_merge', title: 'GFT-merge', version: '0.1.0' },
+      clientInfo: { name: 'gft_merge', title: 'GFT-Merge', version: '0.1.0' },
       capabilities: { experimentalApi: true },
     });
     child.stdin.write(JSON.stringify({ method: 'initialized', params: {} }) + '\n');
