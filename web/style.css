@@ -308,6 +308,12 @@ body.carrying-up .bucket::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pool-item .name[contenteditable='plaintext-only'] {
+  outline: none;
+  cursor: text;
+  text-overflow: clip;
+  border-bottom: 1px solid var(--accent);
+}
 .pool-item .edit {
   visibility: hidden;
   border: none;

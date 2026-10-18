@@ -766,14 +766,24 @@ function renderList() {
           title: '改名',
           onclick: e => {
             e.stopPropagation();
-            const input = el('input', { value: pool.name, className: 'name' });
-            name.replaceWith(input);
-            input.focus();
-            input.select();
-            input.onclick = k => k.stopPropagation();
-            input.onkeydown = k => k.key === 'Enter' && input.blur();
-            input.onblur = () => {
-              const next = input.value.trim();
+            // The name itself becomes editable in place: Enter keeps it, Escape or an empty name drops it.
+            name.contentEditable = 'plaintext-only';
+            name.focus();
+            getSelection().selectAllChildren(name);
+            name.onclick = k => k.stopPropagation();
+            name.onkeydown = k => {
+              if (k.key === 'Enter') {
+                k.preventDefault();
+                name.blur();
+              }
+              if (k.key === 'Escape') {
+                name.textContent = pool.name;
+                name.blur();
+              }
+            };
+            name.onblur = () => {
+              name.contentEditable = 'false';
+              const next = name.textContent.trim();
               if (!next || next === pool.name) return render();
               pool.name = next;
               render();
@@ -910,12 +920,14 @@ let poolsSeen = '';
 async function loadPools({ quiet = false } = {}) {
   const pools = await api('GET', '/api/pools');
   const seen = JSON.stringify(pools);
-  const changed = !quiet || seen !== poolsSeen;
+  // Unchanged pools are kept as they are: the page's handlers hold these very
+  // objects, and a fresh copy would make their changes land on stale ones.
+  if (quiet && seen === poolsSeen) return;
   poolsSeen = seen;
   state.pools = pools;
   if (!state.pools.some(pool => pool.id === state.selectedId))
     state.selectedId = state.pools[0]?.id ?? null;
-  if (changed && !state.dragging) render();
+  if (!state.dragging) render();
 }
 
 async function loadSessions() {
