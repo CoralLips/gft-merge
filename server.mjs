@@ -90,6 +90,7 @@ export function createService({
    */
   async function inject(id, toolId, keys) {
     const tool = toolOf(toolId);
+    const started = Date.now();
     const { text, upto, count, chars } = await pools.pending(
       id,
       { tool: tool.id, id: '-' },
@@ -102,6 +103,7 @@ export function createService({
       text,
     });
     await pools.recordDelivery(id, session, upto);
+    console.log(`新建 ${tool.id}：${count} 段 ${chars} 字，用时 ${Date.now() - started} ms`);
     return { status: 'sent', session, count, chars };
   }
 
@@ -173,7 +175,9 @@ export function createService({
     if (action === 'inject' && method === 'POST') {
       // `source` names one waiting session; without it the fused sessions are sent.
       const { keys } = await sourcesOf(id, body?.source);
+      const pulling = Date.now();
       await pull(id, keys);
+      console.log(`读取来源 ${keys.length} 个：用时 ${Date.now() - pulling} ms`);
       const result = await inject(id, body?.tool, keys);
       return { ...result, pool: await summary(await pools.load(id)) };
     }

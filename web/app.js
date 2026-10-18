@@ -20,6 +20,8 @@ const state = {
   enabled: {},
 
   sessions: {}, // tool id → listed sessions
+  busy: new Set(), // tool ids starting a session now
+  fresh: null, // key of the session just started, shown with a brief highlight
   pools: [],
   selectedId: null,
   dragging: false,
@@ -109,6 +111,7 @@ function renderTools() {
           {},
           el('span', { className: 'dot', style: `background:${color(tool.id)}` }),
           tool.name,
+          state.busy.has(tool.id) ? el('span', { className: 'spinner' }) : null,
           el('span', {
             className: 'count',
             textContent: loaded ? `${sessions.length} 个会话` : '',
@@ -118,7 +121,7 @@ function renderTools() {
           el(
             'li',
             {
-              className: 'session',
+              className: keyOf(item) === state.fresh ? 'session fresh' : 'session',
               dataset: { tool: item.tool, id: item.id },
               title: `${item.title}\n${item.cwd || ''}`,
             },
@@ -453,17 +456,40 @@ const listed = target =>
 async function injectInto(target, source) {
   const pool = selected();
   const tool = target.dataset.tool;
+  // The drop lands at once: the bucket gives a short knock and spins until the session exists.
+  state.busy.add(tool);
+  renderTools();
+  pulse(tool, 'hit');
   const result = await commit(() => api('POST', `/api/pools/${pool.id}/inject`, { tool, source }));
+  state.busy.delete(tool);
   await loadPools();
-  if (result?.status === 'nothing-new') return toast('对方已经有这些内容');
-  if (!result) return;
-  // The session just written to is the tool's most recent one; show it first at once.
+  if (result?.status === 'nothing-new') toast('对方已经有这些内容');
+  if (result?.status !== 'sent') {
+    renderTools();
+    return pulse(tool, 'shake');
+  }
+  // The new session is the tool's most recent one; it rises to the top with a brief highlight.
   const listedSessions = state.sessions[tool] || [];
   state.sessions[tool] = [
     { ...result.session, updatedAt: new Date().toISOString() },
     ...listedSessions.filter(s => s.id !== result.session.id),
   ];
+  state.fresh = keyOf(result.session);
   renderTools();
+  $(`.bucket[data-tool="${tool}"] ul`)?.scrollTo({ top: 0 });
+  setTimeout(() => {
+    if (state.fresh === keyOf(result.session)) state.fresh = null;
+  }, 1600);
+}
+
+/** Plays a one-off animation on a tool's bucket: 'hit' when something lands, 'shake' on failure. */
+function pulse(tool, kind) {
+  const bucket = $(`.bucket[data-tool="${tool}"]`);
+  if (!bucket) return;
+  bucket.classList.remove('hit', 'shake');
+  void bucket.offsetWidth; // restart the animation if it is already playing
+  bucket.classList.add(kind);
+  bucket.addEventListener('animationend', () => bucket.classList.remove(kind), { once: true });
 }
 
 /** Puts a session of the selected pool in the middle (fused) or a cell (waiting). */

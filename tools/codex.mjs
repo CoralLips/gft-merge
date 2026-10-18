@@ -3,6 +3,7 @@
 // Codex lists the new session first, as if the person had written it.
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { openLink } from '../openLink.mjs';
 
 const failure = (message, status = 502, extra = {}) =>
   Object.assign(new Error(message), { status, ...extra });
@@ -164,7 +165,11 @@ const startupClash = error => /initialize (sqlite )?state runtime/i.test(error.c
 const ACK = '\n\n请只回复一句：已收到，并说明来自哪些会话、共几段。';
 const TURN_MS = 15 * 60 * 1000;
 
-export function createCodexTool({ connect = connectAppServer, retryMs = 500 } = {}) {
+export function createCodexTool({
+  connect = connectAppServer,
+  retryMs = 500,
+  open = openLink,
+} = {}) {
   // One app-server starts at a time from here: two starting together clash over
   // Codex's state database. A clash with the Codex app starting up is retried once.
   let last = Promise.resolve();
@@ -191,7 +196,10 @@ export function createCodexTool({ connect = connectAppServer, retryMs = 500 } = 
   };
   /**
    * Starts a turn and returns once Codex has taken it; the connection stays
-   * open until the turn ends, since closing it would stop the reply.
+   * open until the turn ends, since closing it would stop the reply. Then the
+   * Codex app opens the thread: it does not notice on its own, at a steady
+   * time, a thread another app-server wrote, and it cannot take a thread over
+   * while this connection still writes to it.
    */
   const startTurn = async (server, threadId, text) => {
     const done = server.waitFor(
@@ -205,7 +213,10 @@ export function createCodexTool({ connect = connectAppServer, retryMs = 500 } = 
       server.close();
       throw error;
     }
-    done.finally(() => server.close());
+    done.finally(() => {
+      server.close();
+      open(`codex://threads/${threadId}`);
+    });
   };
 
   return {

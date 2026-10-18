@@ -261,9 +261,13 @@ function fakeCodex({ fail = {} } = {}) {
   return { connect, requests, closed: () => closed, finishTurns: () => finish.forEach(f => f()) };
 }
 
-test('Codex 新建：用默认模型开会话、起名、发出第一条', async () => {
+test('Codex 新建：用默认模型开会话、起名、发出第一条；不等回复就返回，回完才断开并在桌面端打开', async () => {
   const codex = fakeCodex();
-  const created = await createCodexTool({ connect: codex.connect }).create({
+  const opened = [];
+  const created = await createCodexTool({
+    connect: codex.connect,
+    open: url => opened.push(url),
+  }).create({
     cwd: 'D:/work/app',
     title: 'merge · 交接',
     text: `${MARKER}内容`,
@@ -275,6 +279,12 @@ test('Codex 新建：用默认模型开会话、起名、发出第一条', async
   assert.equal(codex.requests[1][1].model, 'gpt-test');
   assert.equal(created.session.id, 'new-thread');
   assert.equal(created.session.title, 'merge · 交接');
+  assert.equal(codex.closed(), 0, '回复没结束前不能断开，否则回复会被打断');
+  assert.deepEqual(opened, []);
+  codex.finishTurns();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(codex.closed(), 1);
+  assert.deepEqual(opened, ['codex://threads/new-thread']);
 });
 
 test('Claude 新建走 SDK 的一轮对话：起好名字，再用桌面端的导入链接打开；失败照实报', async () => {

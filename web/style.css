@@ -510,10 +510,65 @@ body.removing #out-zone .out {
 #toast.show {
   opacity: 0.92;
 }
+/* Drop feedback: a knock when something lands, a spinner while the session starts,
+   a highlight on the new session, a shake when it fails */
+.bucket.hit {
+  animation: hit 0.26s ease-out;
+}
+@keyframes hit {
+  40% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 2px var(--ink);
+  }
+}
+.bucket.shake {
+  animation: shake 0.36s ease-in-out;
+}
+@keyframes shake {
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.session.fresh {
+  animation: fresh 1.6s ease-out;
+}
+@keyframes fresh {
+  from {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .item,
   #gridlines,
   #toast {
     transition: none;
+  }
+  .bucket.hit,
+  .bucket.shake,
+  .session.fresh {
+    animation: none;
   }
 }
