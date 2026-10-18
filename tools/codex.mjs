@@ -253,7 +253,9 @@ export function createCodexTool({
           sortDirection: 'desc',
           useStateDbOnly: true,
         });
+        // Threads Codex does not keep (such as a compression's) are not the person's sessions.
         return (result?.data || [])
+          .filter(thread => !thread.ephemeral)
           .map(describe)
           .filter(session => !since || (session.updatedAt || '') >= since);
       }),

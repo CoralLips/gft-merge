@@ -282,13 +282,29 @@ export function createClaudeTool({
       return { messages: condense(raw), context: contextOf(raw) };
     },
 
-    /** Model aliases the Claude Agent SDK accepts; an empty ID is the person's default. */
-    models: async () => [
-      { id: '', name: '默认' },
-      { id: 'haiku', name: 'Haiku' },
-      { id: 'sonnet', name: 'Sonnet' },
-      { id: 'opus', name: 'Opus' },
-    ],
+    /**
+     * The models this Claude account can use, as Claude Code lists them. Asking
+     * starts Claude Code without sending a message, so it costs nothing. The
+     * default model has an empty ID, which leaves the person's own default.
+     */
+    async models() {
+      const api = await sdk();
+      const session = api.query({
+        prompt: (async function* () {
+          await new Promise(() => {});
+        })(),
+        options: { env: childEnvironment(), settingSources: ['user'], persistSession: false },
+      });
+      try {
+        return (await session.supportedModels()).map(model =>
+          model.value === 'default'
+            ? { id: '', name: '默认' }
+            : { id: model.value, name: model.displayName },
+        );
+      } finally {
+        session.close();
+      }
+    },
 
     /** One answer to the compression request, in a session that is not kept. */
     async summarize({ text, model }) {
