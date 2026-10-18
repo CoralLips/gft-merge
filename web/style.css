@@ -10,6 +10,9 @@
   --danger: #c0533a;
   --claude: #d97757;
   --codex: #c9c5bc;
+  /* Tool names as text need more contrast than the tool dots */
+  --claude-text: #b85a38;
+  --codex-text: #7d786e;
   --gap: 32px;
   color-scheme: light;
 }
@@ -23,6 +26,8 @@
     --ink: #d8d4cb;
     --accent: #7aa6d6;
     --codex: #b8b4ab;
+    --claude-text: #e08f6f;
+    --codex-text: #b8b4ab;
     color-scheme: dark;
   }
 }
@@ -35,6 +40,8 @@
   --ink: #d8d4cb;
   --accent: #7aa6d6;
   --codex: #b8b4ab;
+  --claude-text: #e08f6f;
+  --codex-text: #b8b4ab;
   color-scheme: dark;
 }
 * {
@@ -623,4 +630,9 @@ body.removing #out-zone .out {
   .session.fresh {
     animation: none;
   }
+}
+
+/* A session's tool, written in front of its name */
+.tag {
+  font-weight: 600;
 }

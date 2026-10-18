@@ -229,13 +229,22 @@ const inside = (node, e) => {
   const r = node.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 };
-const chip = item =>
-  el(
-    'span',
-    { className: 'chip' },
-    el('span', { className: 'dot', style: `background:${color(item.tool)}` }),
-    item.title,
-  );
+/** A session's name with its tool in front, since sessions in different tools share names. */
+const TOOL_TAGS = { claude: 'Claude', codex: 'Codex' };
+const sourceName = item => `${TOOL_TAGS[item.tool] || item.tool} · ${item.title}`;
+/** The same name as nodes, with the tool in its color. */
+const sourceNodes = item => [
+  el('span', {
+    className: 'tag',
+    style: `color:var(--${item.tool}-text, var(--muted))`,
+    textContent: TOOL_TAGS[item.tool] || item.tool,
+  }),
+  ` · ${item.title}`,
+];
+/** Several names, separated by 、 */
+const sourceList = items =>
+  items.flatMap((item, i) => [...(i ? ['、'] : []), ...sourceNodes(item)]);
+const chip = item => el('span', { className: 'chip' }, ...sourceNodes(item));
 
 // ---- Balls: hollow vector circles with their size in the middle ----
 // A ball grows with how many sessions it holds and approaches a ceiling set by
@@ -264,10 +273,8 @@ function sizeOf(b) {
   return b.tokens ? `≈${short(b.tokens)}` : '';
 }
 /** The names of the sessions a ball holds, compacted ones included; the label cuts them short. */
-const nameOf = b =>
-  [...b.compacts.flatMap(c => c.from.map(f => f.title)), ...b.sessions.map(s => s.title)].join(
-    '、',
-  );
+const sourcesOf = b => [...b.compacts.flatMap(c => c.from), ...b.sessions];
+const nameOf = b => sourcesOf(b).map(sourceName).join('、');
 function ballSvg(r, { spinning = false, label = '' } = {}) {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('width', 2 * r + 4);
@@ -394,10 +401,9 @@ function renderWorkspace() {
     const spinning = b.compressing || state.compressing.has(b.id);
     const svg = ballSvg(r, { spinning, label: sizeOf(b) });
     svg.addEventListener('pointerdown', e => carryBall(e, b, node));
-    const name = el('span', {
-      className: spinning ? 'label compressing' : 'label',
-      textContent: spinning ? '压缩中…' : nameOf(b),
-    });
+    const name = spinning
+      ? el('span', { className: 'label compressing', textContent: '压缩中…' })
+      : el('span', { className: 'label', title: nameOf(b) }, ...sourceList(sourcesOf(b)));
     const parts = membersOf(b) > 1 || b.compacts.length ? composition(b) : null;
     const node = el(
       'div',
@@ -424,7 +430,8 @@ function composition(b) {
       el(
         'div',
         { className: 'part sealed', title: '已压缩，不能拆开' },
-        `已压缩 · ${compact.from.map(f => f.title).join('、')}`,
+        '已压缩 · ',
+        ...sourceList(compact.from),
         el('span', { className: 'meta', textContent: ` ${short(compact.tokens)}` }),
       ),
     ),
@@ -449,8 +456,11 @@ function composition(b) {
 // ---- Where a carried thing would land ----
 /** A target under the pointer: a tool's bucket, or another pool. */
 function targetAt(e, { pools = false } = {}) {
-  const under = document.elementFromPoint(e.clientX, e.clientY);
-  const found = under?.closest(pools ? '.bucket, .pool-item' : '.bucket');
+  // Found by position, not by what the browser reports under the pointer, so a
+  // drop never misses its target and falls through to removing the ball.
+  const hit = (selector, area) =>
+    inside($(area), e) ? [...document.querySelectorAll(selector)].find(n => inside(n, e)) : null;
+  const found = hit('.bucket', '#top') || (pools ? hit('.pool-item', '#pools') : null);
   if (found?.matches('.pool-item') && found.dataset.id === state.selectedId) return null;
   return found || null;
 }
