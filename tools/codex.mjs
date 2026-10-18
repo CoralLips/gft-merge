@@ -2,7 +2,9 @@
 // start one whose first message is a pool. That message is a real turn, so
 // Codex lists the new session first, as if the person had written it.
 import { spawn } from 'node:child_process';
+import { open as openFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { COMPRESS } from '../home.mjs';
 import { openLink } from '../openLink.mjs';
 
 const failure = (message, status = 502, extra = {}) =>
@@ -162,6 +164,26 @@ export function turnMessages(turn) {
 const startupClash = error => /initialize (sqlite )?state runtime/i.test(error.codexMessage || '');
 
 /** Asked with each sent message, so the reply is short. */
+/** A session's context size: the last token count Codex wrote into its rollout file. */
+async function contextOf(file) {
+  const handle = await openFile(file).catch(() => null);
+  if (!handle) return null;
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, 1 << 20);
+    const { buffer } = await handle.read(Buffer.alloc(length), 0, length, size - length);
+    const line = buffer
+      .toString('utf8')
+      .split('\n')
+      .findLast(item => item.includes('"token_count"') && item.includes('last_token_usage'));
+    return line ? (JSON.parse(line).payload?.info?.last_token_usage?.total_tokens ?? null) : null;
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
+}
+
 const ACK = '\n\n请只回复一句：已收到，并说明来自哪些会话、共几段。';
 const TURN_MS = 15 * 60 * 1000;
 
@@ -237,6 +259,10 @@ export function createCodexTool({
       }),
 
     /** Reads newest first and stops at a page holding a message the pool already has. */
+    /**
+     * New messages, newest first until a page holds one the pool already has,
+     * returned in time order; and the session's own context size in tokens.
+     */
     readMessages: (session, { known = new Set() } = {}) =>
       withServer(async request => {
         const turns = [];
@@ -254,8 +280,52 @@ export function createCodexTool({
           if (data.some(turn => turnMessages(turn).some(message => known.has(message.id)))) break;
           cursor = page?.nextCursor || null;
         } while (cursor);
-        return turns.reverse().flatMap(turnMessages);
+        const path = (await request('thread/read', { threadId: session.id }).catch(() => null))
+          ?.thread?.path;
+        return {
+          messages: turns.reverse().flatMap(turnMessages),
+          context: path ? await contextOf(path) : null,
+        };
       }),
+
+    /** The models this Codex account can use, default first. */
+    models: () =>
+      withServer(async request =>
+        ((await request('model/list', { limit: 100 }))?.data || [])
+          .filter(item => !item.hidden)
+          .sort((a, b) => b.isDefault - a.isDefault)
+          .map(item => ({ id: item.model, name: item.displayName || item.model })),
+      ),
+
+    /** One answer to the compression request, in a thread Codex does not keep. */
+    async summarize({ text, model }) {
+      const server = await opened();
+      try {
+        const { thread } = await server.request('thread/start', {
+          ephemeral: true,
+          ...(model ? { model } : {}),
+          approvalPolicy: 'never',
+          sandbox: 'read-only',
+        });
+        const done = server.waitFor(
+          'turn/completed',
+          params => (params?.threadId ?? params?.turn?.threadId) === thread.id,
+          TURN_MS,
+        );
+        await server.request('turn/start', {
+          threadId: thread.id,
+          input: [{ type: 'text', text: COMPRESS + text }],
+        });
+        const result = await done;
+        const answer = (result?.turn?.items || [])
+          .filter(item => item.type === 'agentMessage' && item.text?.trim())
+          .at(-1)?.text;
+        if (!answer) throw failure('Codex 没有给出压缩结果');
+        return answer.trim();
+      } finally {
+        server.close();
+      }
+    },
 
     /** Starts a session whose first message is `text`; Codex answers in the background. */
     async create({ cwd, title, text }) {

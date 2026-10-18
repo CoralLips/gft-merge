@@ -8,6 +8,9 @@ export const homeDir = () =>
 
 /** Text placed at the start of everything GFT-Merge writes into a session. */
 export const MARKER = '〔GFT-Merge〕';
+/** What a processing tool is asked when a ball is compressed; the ball's content follows. */
+export const COMPRESS =
+  '把下面几段会话记录压缩成一份，供另一个 AI 接着工作：保留结论、决定、没定的问题和关键事实，去掉重复和过程，保持原文语言，标明各条来自哪个会话。只输出压缩结果。\n\n';
 
 export async function readJson(file, fallback = null) {
   try {

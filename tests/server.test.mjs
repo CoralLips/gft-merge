@@ -15,7 +15,15 @@ function fakeTool(id) {
     sessions,
     sent,
     listSessions: async () => [...sessions.values()].map(item => item.session),
-    readMessages: async session => sessions.get(session.id)?.messages ?? [],
+    readMessages: async session => ({
+      messages: sessions.get(session.id)?.messages ?? [],
+      context: 5000,
+    }),
+    models: async () => [{ id: '', name: '默认' }],
+    summarize: async ({ text, model }) => {
+      sent.push({ id: 'summary', text, model });
+      return `摘要（${model || '默认'}）`;
+    },
     create: async ({ cwd, title, text }) => {
       const session = { tool: id, id: 'created', title, cwd };
       sent.push({ id: 'created', cwd, text });
@@ -67,53 +75,80 @@ async function withServer(run) {
   }
 }
 
-test('拖进池子、融合，拖到工具区：新建会话，第一条是融合的内容，项目取来源会话所在目录', () =>
+test('会话拖进来各自成球；一个球拖到另一个上融合；拖到工具区用这个球新建会话，项目取来源目录', () =>
   withServer(async ({ call, claude, codex }) => {
     const discussion = claude.add('c1', '方案定 A');
     const work = codex.add('x1', '已写完第一步');
+    const extra = codex.add('x2', '不相干');
     const pool = await call('POST', '/api/pools', { name: '交接' });
-    await call('POST', `/api/pools/${pool.id}/sessions`, { ...discussion, cell: 0 });
-    await call('POST', `/api/pools/${pool.id}/sessions`, { ...work, fused: true });
-    const created = await call('POST', `/api/pools/${pool.id}/inject`, { tool: 'claude' });
+    const first = await call('POST', `/api/pools/${pool.id}/sessions`, { ...discussion, cell: 0 });
+    const ballA = first.pool.balls[0].id;
+    assert.equal(first.pool.balls[0].sessions[0].context, 5000, '会话本身的上下文大小');
+    const second = await call('POST', `/api/pools/${pool.id}/sessions`, { ...work, ball: ballA });
+    assert.equal(second.pool.balls.length, 1, '拖到球上就并进去');
+    await call('POST', `/api/pools/${pool.id}/sessions`, { ...extra, cell: 5 });
+    const pools = await call('GET', '/api/pools');
+    const ball = pools[0].balls.find(b => b.id === ballA);
+    assert.ok(ball.tokens > 0, '融合球带着本地数出来的 token 数');
+    const created = await call('POST', `/api/pools/${pool.id}/inject`, {
+      tool: 'claude',
+      ball: ballA,
+    });
     assert.equal(created.status, 'sent');
     assert.equal(created.session.title, 'merge · 交接');
     assert.equal(claude.sent.at(-1).cwd, 'D:/work/app');
-    assert.match(claude.sent.at(-1).text, /已写完第一步/);
-    assert.doesNotMatch(claude.sent.at(-1).text, /方案定 A/, '等着的会话不随融合内容送出');
-    assert.deepEqual(
-      created.pool.deliveries.map(d => [d.tool, d.id]),
-      [['claude', 'created']],
-    );
-  }));
-
-test('单个待融合会话可以单独新建；没有融合内容时拖融合球会被拒绝', () =>
-  withServer(async ({ call, claude, codex }) => {
-    const waiting = claude.add('c1', '只送这一段');
-    const pool = await call('POST', '/api/pools', { name: '迁移' });
-    await call('POST', `/api/pools/${pool.id}/sessions`, waiting);
-    await assert.rejects(
-      call('POST', `/api/pools/${pool.id}/inject`, { tool: 'codex' }),
-      /还没有融合/,
-    );
+    assert.match(claude.sent.at(-1).text, /方案定 A[\s\S]*已写完第一步/);
+    assert.doesNotMatch(claude.sent.at(-1).text, /不相干/, '别的球不跟着送');
     const single = await call('POST', `/api/pools/${pool.id}/inject`, {
       tool: 'codex',
-      source: 'claude:c1',
+      ball: ballA,
+      source: 'codex:x1',
     });
     assert.equal(single.status, 'sent');
-    assert.match(codex.sent.at(-1).text, /只送这一段/);
+    assert.doesNotMatch(codex.sent.at(-1).text, /方案定 A/, '只送拖出来的那一段');
   }));
 
-test('会话可以移到另一个池子', () =>
-  withServer(async ({ call, claude }) => {
+test('点球压缩：用设置里的处理工具和模型调一次，球变成压缩块，原会话离开池子', () =>
+  withServer(async ({ call, claude, codex }) => {
+    const discussion = claude.add('c1', '很长的讨论');
+    const pool = await call('POST', '/api/pools', { name: '交接' });
+    const added = await call('POST', `/api/pools/${pool.id}/sessions`, discussion);
+    const ballId = added.pool.balls[0].id;
+    await call('PUT', '/api/settings', { processor: { tool: 'codex', model: 'm1' } });
+    const processors = await call('GET', '/api/processors');
+    assert.deepEqual(
+      processors.map(p => p.tool),
+      ['claude', 'codex'],
+    );
+    const compressed = await call('POST', `/api/pools/${pool.id}/compress`, { ball: ballId });
+    const ball = compressed.balls[0];
+    assert.equal(codex.sent.at(-1).model, 'm1');
+    assert.match(codex.sent.at(-1).text, /很长的讨论/);
+    assert.equal(ball.sessions.length, 0);
+    assert.equal(ball.compacts.length, 1);
+    assert.equal(ball.compacts[0].text, undefined, '列表里不带压缩全文');
+    await call('POST', `/api/pools/${pool.id}/inject`, { tool: 'claude', ball: ballId });
+    assert.match(claude.sent.at(-1).text, /已压缩[\s\S]*摘要（m1）/);
+  }));
+
+test('整个球可以搬到另一个池子，也可以整个移出', () =>
+  withServer(async ({ call, claude, codex }) => {
     const session = claude.add('c1', '搬家');
     const from = await call('POST', '/api/pools', { name: '甲' });
     const to = await call('POST', '/api/pools', { name: '乙' });
-    await call('POST', `/api/pools/${from.id}/sessions`, session);
-    const moved = await call('POST', `/api/pools/${from.id}/move`, { key: 'claude:c1', to: to.id });
+    const added = await call('POST', `/api/pools/${from.id}/sessions`, session);
+    const moved = await call('POST', `/api/pools/${from.id}/move`, {
+      ball: added.pool.balls[0].id,
+      to: to.id,
+    });
     assert.equal(moved.id, to.id);
-    assert.equal(moved.sessions[0].messages, 1);
-    const pools = await call('GET', '/api/pools');
-    assert.equal(pools.find(p => p.id === from.id).sessions.length, 0);
+    assert.equal(moved.balls[0].sessions[0].id, 'c1');
+    const again = await call('POST', `/api/pools/${to.id}/sessions`, codex.add('x1', '另一个'));
+    const removed = await call(
+      'DELETE',
+      `/api/pools/${to.id}/balls/${again.pool.balls.find(b => b.sessions[0].id === 'x1').id}`,
+    );
+    assert.equal(removed.balls.length, 1);
   }));
 
 test('只接受本机同源的 JSON 写请求', () =>

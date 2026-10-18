@@ -255,6 +255,16 @@ body.carrying-up .bucket::after {
   cursor: pointer;
   white-space: nowrap;
 }
+.segment select {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
 .segment button[aria-pressed='true'] {
   background: var(--panel);
   color: var(--accent);
@@ -341,14 +351,6 @@ body.dragging #gridlines {
   position: absolute;
   border: 1px dashed var(--line);
 }
-.cell.middle {
-  border-color: var(--muted);
-}
-#workspace.fusing .cell.middle {
-  border-style: solid;
-  border-color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-}
 #preview[hidden] {
   display: none;
 }
@@ -363,77 +365,128 @@ body.dragging #gridlines {
   stroke-width: 1.5;
   stroke-dasharray: 3 3;
 }
+/* A ball: the circle with its size in the middle, and its name below, apart from it */
+.ball {
+  cursor: grab;
+  touch-action: none;
+  overflow: visible;
+}
 .ball circle {
-  fill: none;
+  fill: var(--bg);
   stroke: var(--ink);
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
 }
-.item {
+.ball.solid circle {
+  stroke-dasharray: none;
+}
+.ball text {
+  fill: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+/* Compressing: the dashed ring turns slowly until the compact arrives */
+.ball.spinning circle {
+  stroke-dasharray: 4 3;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: spin 2.4s linear infinite;
+}
+.orb {
   position: absolute;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, calc(-1 * var(--r) - 2px));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  cursor: grab;
-  touch-action: none;
+  gap: 12px;
   transition:
     left 0.18s ease-out,
     top 0.18s ease-out;
 }
-.item.lifted {
+.orb.lifted {
   transition: none;
   z-index: 5;
-  cursor: grabbing;
   pointer-events: none;
 }
-.item .label {
+.orb.fuse-target .ball circle {
+  stroke-width: 2.5;
+  fill: color-mix(in srgb, var(--ink) 6%, var(--bg));
+}
+.orb .name {
+  position: relative;
   font-size: 12px;
   color: var(--muted);
+}
+.orb .label {
+  display: block;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The composition shows only while the name is hovered */
+.parts {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  min-width: 180px;
+  max-width: 280px;
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px #0002;
+}
+/* An invisible margin around the list keeps it open while the pointer crosses the gap to it. */
+.parts::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  z-index: -1;
+}
+.orb.up .parts {
+  top: auto;
+  bottom: 0;
+  left: 100%;
+  transform: none;
+  margin: 0 0 0 10px;
+}
+.orb .name:hover .parts,
+.parts:hover {
+  display: grid;
+  gap: 4px;
+}
+.orb .name:hover .label {
+  color: var(--text);
+}
+.part {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+  touch-action: none;
+  white-space: nowrap;
+}
+.part.sealed {
+  cursor: default;
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .slot {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 120px;
-  height: 120px;
-  border: 1.5px dashed var(--line);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  max-width: 80%;
   text-align: center;
   font-size: 12px;
   color: var(--muted);
   pointer-events: none;
-}
-.fused {
-  position: absolute;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-.fused .ball {
-  cursor: grab;
-  touch-action: none;
-}
-.fused.lifted .ball {
-  opacity: 0.3;
-}
-.fused .caption {
-  font-size: 12px;
-  color: var(--muted);
-}
-.members {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
 }
 .chip {
   display: inline-flex;
@@ -445,10 +498,6 @@ body.dragging #gridlines {
   border-radius: 999px;
   padding: 2px 10px;
   white-space: nowrap;
-}
-.members .chip {
-  cursor: grab;
-  touch-action: none;
 }
 .busy {
   opacity: 0.5;
@@ -521,7 +570,8 @@ body.removing #out-zone .out {
     box-shadow: 0 0 0 2px var(--ink);
   }
 }
-.bucket.shake {
+.bucket.shake,
+.orb.shake {
   animation: shake 0.36s ease-in-out;
 }
 @keyframes shake {
@@ -561,13 +611,15 @@ body.removing #out-zone .out {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .item,
+  .orb,
   #gridlines,
   #toast {
     transition: none;
   }
   .bucket.hit,
   .bucket.shake,
+  .orb.shake,
+  .ball.spinning circle,
   .session.fresh {
     animation: none;
   }

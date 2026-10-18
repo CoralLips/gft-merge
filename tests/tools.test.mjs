@@ -45,13 +45,14 @@ test('Codex 从最新往回读，碰到池子里已有的消息就停，结果�
   const tool = createCodexTool({
     connect: async () => ({
       request: async (method, params) => {
+        if (method === 'thread/read') return { thread: { path: null } };
         requested.push(params.cursor ?? 'p1');
         return pages[{ p1: 0, p2: 1, p3: 2 }[params.cursor ?? 'p1']];
       },
       close: () => {},
     }),
   });
-  const messages = await tool.readMessages({ id: 't' }, { known: new Set(['u3']) });
+  const { messages } = await tool.readMessages({ id: 't' }, { known: new Set(['u3']) });
   assert.deepEqual(requested, ['p1', 'p2'], '读到含已知消息的那一页就停');
   assert.deepEqual(
     messages.map(item => item.id),
@@ -322,4 +323,73 @@ test('Claude 新建走 SDK 的一轮对话：起好名字，再用桌面端的�
     }),
   });
   await assert.rejects(failing.create({ cwd: 'D:/work', title: 't', text: 'x' }), /额度不足/);
+});
+
+test('会话本身的上下文大小直接读：Claude 取最后一条回答的用量，Codex 取会话文件里最后一次计数', async () => {
+  const sdk = async () => ({
+    getSessionMessages: async () => [
+      { type: 'user', uuid: 'u', message: { content: '问' } },
+      {
+        type: 'assistant',
+        uuid: 'a',
+        message: {
+          content: [{ type: 'text', text: '答' }],
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 2,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 3000,
+            output_tokens: 50,
+          },
+        },
+      },
+    ],
+  });
+  const read = await createClaudeTool({ sdk }).readMessages({ id: 'c1' });
+  assert.equal(read.context, 3152);
+  const dir = await temporary('gft-merge-rollout-');
+  try {
+    const file = path.join(dir, 'rollout.jsonl');
+    const count = total =>
+      JSON.stringify({
+        type: 'event_msg',
+        payload: { type: 'token_count', info: { last_token_usage: { total_tokens: total } } },
+      });
+    await writeFile(file, [count(100), count(176254), '{"type":"turn_context"}'].join('\n'));
+    const codex = createCodexTool({
+      connect: async () => ({
+        request: async method =>
+          method === 'thread/read' ? { thread: { path: file } } : { data: [], nextCursor: null },
+        close: () => {},
+      }),
+    });
+    assert.equal((await codex.readMessages({ id: 't' })).context, 176254);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('压缩只调一次模型，而且不留会话：Claude 不存会话文件，Codex 开临时会话', async () => {
+  let options = null;
+  const claude = createClaudeTool({
+    sdk: async () => ({
+      query: ({ prompt, options: given }) =>
+        (async function* () {
+          options = given;
+          assert.match(prompt, /压缩[\s\S]*原文/);
+          yield { type: 'result', is_error: false, result: ' 摘要 ' };
+        })(),
+    }),
+  });
+  assert.equal(await claude.summarize({ text: '原文', model: 'haiku' }), '摘要');
+  assert.equal(options.persistSession, false);
+  assert.equal(options.model, 'haiku');
+  const codex = fakeCodex();
+  const done = createCodexTool({ connect: codex.connect }).summarize({ text: '原文', model: 'm' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  codex.finishTurns();
+  await assert.rejects(done, /没有给出压缩结果/, '假的 Codex 不回文字时照实报');
+  const start = codex.requests.find(([method]) => method === 'thread/start')[1];
+  assert.equal(start.ephemeral, true);
+  assert.equal(start.model, 'm');
 });

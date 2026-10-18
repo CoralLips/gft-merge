@@ -1,13 +1,12 @@
-// Pools: named collections of session messages, and what each target has received.
+// Pools: named workbenches of session messages.
 //
-// A pool file holds its sessions and a delivery record per target; its messages
-// live beside it, one JSON line each, numbered by `seq` in arrival order.
+// A pool file holds its sessions and balls; its messages live beside it, one
+// JSON line each, numbered by `seq` in arrival order.
 //
-// A session in a pool is either waiting (`fused: false`, shown in a grid cell)
-// or fused into the pool. Injecting sends either the fused sessions or one
-// waiting session, so a target records, per source session, the last `seq` it
-// was sent. Sending only what is past that mark is what keeps repeats empty.
-
+// Every session sits in a ball. A ball holds one session or several fused ones,
+// and may hold compacts: the model's condensed text of sessions that were fused
+// and compressed. Compacted sessions leave the pool; a compact cannot be split.
+// Dragging a ball up starts a session with the ball's content.
 import { randomUUID } from 'node:crypto';
 import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,31 +14,44 @@ import { MARKER, homeDir, readJson, writeJson, appendLines, readLines } from './
 
 export const sessionKey = ({ tool, id }) => `${tool}:${id}`;
 const messageKey = message => sessionKey({ tool: message.tool, id: message.sessionId });
+const newId = () => randomUUID().slice(0, 8);
 
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
 /** Text GFT-Merge sent into a session, including that sent before the name was capitalised. */
 const sentByUs = text => text.toLowerCase().startsWith(MARKER.toLowerCase());
 
-/** Pools written before sessions could wait are read as fused, with a per-session delivery mark. */
+/**
+ * Pools from before balls: the fused sessions become one ball, each waiting
+ * session its own. Ball IDs follow the session order, so every read of a pool
+ * not yet saved again gives the same IDs.
+ */
 function upgrade(pool) {
-  for (const session of pool.sessions) {
-    session.fused ??= true;
-    session.cell ??= null;
-  }
-  for (const delivery of Object.values(pool.deliveries)) {
-    if (!delivery.sent) {
-      const seq = delivery.sentSeq ?? delivery.deliveredSeq ?? 0;
-      delivery.sent = Object.fromEntries(pool.sessions.map(session => [sessionKey(session), seq]));
-      delete delivery.sentSeq;
-      delete delivery.deliveredSeq;
+  if (!pool.balls) {
+    pool.balls = [];
+    let fused = null;
+    for (const [index, session] of pool.sessions.entries()) {
+      if (session.fused !== false) {
+        fused ??= { id: 'fused', cell: null, compacts: [] };
+        session.ball = fused.id;
+      } else {
+        const ball = { id: `waiting-${index}`, cell: session.cell ?? null, compacts: [] };
+        pool.balls.push(ball);
+        session.ball = ball.id;
+      }
+      delete session.fused;
+      delete session.cell;
     }
-    // Sends that once waited for a hook count as sent.
-    if (delivery.queued)
-      for (const [s, seq] of Object.entries(delivery.queued))
-        delivery.sent[s] = Math.max(delivery.sent[s] ?? 0, seq);
-    delete delivery.queued;
-    delivery.status = 'delivered';
+    if (fused) pool.balls.unshift(fused);
   }
+  delete pool.deliveries;
+  return pool;
+}
+
+/** Drops balls left with neither sessions nor compacts. */
+function tidy(pool) {
+  pool.balls = pool.balls.filter(
+    ball => ball.compacts.length || pool.sessions.some(session => session.ball === ball.id),
+  );
   return pool;
 }
 
@@ -62,12 +74,30 @@ export function createPools({ home = homeDir() } = {}) {
     return upgrade(pool);
   }
   const save = pool =>
-    writeJson(poolFile(pool.id), { ...pool, updatedAt: new Date().toISOString() });
+    writeJson(poolFile(pool.id), { ...tidy(pool), updatedAt: new Date().toISOString() });
   const findSession = (pool, key) => {
     const session = pool.sessions.find(item => sessionKey(item) === key);
     if (!session) throw failure('这段会话不在池子里', 404);
     return session;
   };
+  const findBall = (pool, ballId) => {
+    const ball = pool.balls.find(item => item.id === ballId);
+    if (!ball) throw failure('这个球不在池子里', 404);
+    return ball;
+  };
+  const newBall = (pool, cell = null) => {
+    const ball = { id: newId(), cell: Number.isInteger(cell) ? cell : null, compacts: [] };
+    pool.balls.push(ball);
+    return ball;
+  };
+  /** Rewrites the message file without the given sessions' messages. */
+  async function dropMessages(id, keys) {
+    const kept = (await readLines(messageFile(id))).filter(
+      message => !keys.has(messageKey(message)),
+    );
+    await rm(messageFile(id), { force: true });
+    await appendLines(messageFile(id), kept);
+  }
 
   async function list() {
     const names = await readdir(directory).catch(() => []);
@@ -90,8 +120,8 @@ export function createPools({ home = homeDir() } = {}) {
       createdAt: now,
       updatedAt: now,
       sessions: [],
+      balls: [],
       nextSeq: 1,
-      deliveries: {},
     };
     await save(pool);
     return pool;
@@ -123,25 +153,30 @@ export function createPools({ home = homeDir() } = {}) {
   }
 
   /**
-   * Adds a session (waiting, unless `place` says otherwise) and its new messages;
-   * known message IDs and text GFT-Merge injected earlier are skipped.
+   * Adds a session's new messages, and the session itself if it is new: into
+   * ball `place.ball` when given, else a new ball at `place.cell`. Known message
+   * IDs and text GFT-Merge sent are skipped. `context` is the session's own
+   * context size in tokens, as its tool reports it.
    */
-  const merge = (id, session, messages, place = {}) =>
+  const merge = (id, session, messages, place = {}, context) =>
     serially(id, async () => {
       const pool = await load(id);
       const { tool, id: sessionId, title, cwd } = session;
-      const existing = pool.sessions.find(item => sessionKey(item) === sessionKey(session));
+      let existing = pool.sessions.find(item => sessionKey(item) === sessionKey(session));
       if (existing) Object.assign(existing, { title, cwd });
-      else
-        pool.sessions.push({
+      else {
+        const ball = pool.balls.find(item => item.id === place.ball) || newBall(pool, place.cell);
+        existing = {
           tool,
           id: sessionId,
           title,
           cwd: cwd ?? null,
-          fused: place.fused ?? false,
-          cell: place.cell ?? null,
+          ball: ball.id,
           addedAt: new Date().toISOString(),
-        });
+        };
+        pool.sessions.push(existing);
+      }
+      if (Number.isFinite(context)) existing.context = context;
       const known = await knownIds(id, session);
       const fresh = messages
         .filter(message => !known.has(message.id) && !sentByUs(message.text))
@@ -156,44 +191,90 @@ export function createPools({ home = homeDir() } = {}) {
         }));
       await appendLines(messageFile(id), fresh);
       await save(pool);
-      return { pool, added: fresh.length };
+      return { pool, added: fresh.length, ball: existing.ball };
     });
 
-  /** Fuses or unfuses a session, or moves it to another cell. */
-  const place = (id, key, { fused, cell }) =>
+  /** Moves a ball to another cell. */
+  const placeBall = (id, ballId, cell) =>
     serially(id, async () => {
       const pool = await load(id);
-      const session = findSession(pool, key);
-      if (fused !== undefined) session.fused = !!fused;
-      if (cell !== undefined) session.cell = Number.isInteger(cell) ? cell : null;
+      findBall(pool, ballId).cell = Number.isInteger(cell) ? cell : null;
       await save(pool);
       return pool;
     });
 
-  /** Takes a session and its messages out of the pool. Earlier deliveries stand. */
+  /** Fuses ball `fromId` into ball `intoId`: its sessions and compacts join it. */
+  const fuseBalls = (id, fromId, intoId) =>
+    serially(id, async () => {
+      const pool = await load(id);
+      const from = findBall(pool, fromId);
+      const into = findBall(pool, intoId);
+      if (from === into) return pool;
+      for (const session of pool.sessions) if (session.ball === from.id) session.ball = into.id;
+      into.compacts.push(...from.compacts);
+      from.compacts = [];
+      await save(pool);
+      return pool;
+    });
+
+  /** Takes a session out of its ball: into ball `to.ball`, or a new ball at `to.cell`. */
+  const splitSession = (id, key, to = {}) =>
+    serially(id, async () => {
+      const pool = await load(id);
+      const session = findSession(pool, key);
+      const ball = pool.balls.find(item => item.id === to.ball) || newBall(pool, to.cell);
+      session.ball = ball.id;
+      await save(pool);
+      return pool;
+    });
+
+  /** Takes a session and its messages out of the pool. */
   const removeSession = (id, key) =>
     serially(id, async () => {
       const pool = await load(id);
       findSession(pool, key);
       pool.sessions = pool.sessions.filter(item => sessionKey(item) !== key);
-      const kept = (await readLines(messageFile(id))).filter(
-        message => messageKey(message) !== key,
-      );
-      await rm(messageFile(id), { force: true });
-      await appendLines(messageFile(id), kept);
+      await dropMessages(id, new Set([key]));
       await save(pool);
       return pool;
     });
 
-  /** Moves a session with its messages into another pool, where it waits unfused. */
-  async function moveSession(fromId, key, toId) {
+  /** Takes a ball, its sessions and their messages out of the pool. */
+  const removeBall = (id, ballId) =>
+    serially(id, async () => {
+      const pool = await load(id);
+      findBall(pool, ballId);
+      const keys = new Set(
+        pool.sessions.filter(session => session.ball === ballId).map(sessionKey),
+      );
+      pool.sessions = pool.sessions.filter(session => session.ball !== ballId);
+      pool.balls = pool.balls.filter(ball => ball.id !== ballId);
+      await dropMessages(id, keys);
+      await save(pool);
+      return pool;
+    });
+
+  /** Moves a ball with its sessions, messages and compacts into another pool. */
+  async function moveBall(fromId, ballId, toId) {
     if (fromId === toId) return load(toId);
-    const session = findSession(await load(fromId), key);
-    const carried = (await readLines(messageFile(fromId)))
-      .filter(message => messageKey(message) === key)
-      .map(({ id, role, text, at }) => ({ id, role, text, at }));
-    await merge(toId, session, carried, { fused: false, cell: null });
-    await removeSession(fromId, key);
+    const from = await load(fromId);
+    const ball = findBall(from, ballId);
+    const sessions = from.sessions.filter(session => session.ball === ballId);
+    const lines = await readLines(messageFile(fromId));
+    let target = null;
+    for (const session of sessions) {
+      const carried = lines
+        .filter(message => messageKey(message) === sessionKey(session))
+        .map(({ id, role, text, at }) => ({ id, role, text, at }));
+      ({ ball: target } = await merge(toId, session, carried, { ball: target }, session.context));
+    }
+    await serially(toId, async () => {
+      const to = await load(toId);
+      const into = to.balls.find(item => item.id === target) || newBall(to);
+      into.compacts.push(...ball.compacts);
+      await save(to);
+    });
+    await removeBall(fromId, ballId);
     return load(toId);
   }
 
@@ -204,47 +285,71 @@ export function createPools({ home = homeDir() } = {}) {
   }
 
   /**
-   * What a target has not been sent yet from `sources` (session keys; the fused
-   * sessions when omitted), as the text to inject. The target's own messages
-   * are left out; past `limit` characters the oldest messages give way.
+   * A ball's content as the text to send: its compacts, then its sessions'
+   * messages in time order. With `only`, just that one session of the ball.
    */
-  async function pending(id, target, { sources, limit = Infinity } = {}) {
+  async function ballContent(id, ballId, { only } = {}) {
     const pool = await load(id);
-    const key = sessionKey(target);
-    const chosen = new Set(
-      sources ?? pool.sessions.filter(session => session.fused).map(sessionKey),
+    const ball = findBall(pool, ballId);
+    const keys = new Set(
+      pool.sessions
+        .filter(session => session.ball === ballId)
+        .map(sessionKey)
+        .filter(key => !only || key === only),
     );
-    chosen.delete(key);
-    const sent = pool.deliveries[key]?.sent ?? {};
-    const mark = source => sent[source] ?? 0;
-    const unseen = (await readLines(messageFile(id)))
-      .filter(message => chosen.has(messageKey(message)))
-      .filter(message => message.seq > mark(messageKey(message)))
+    const compacts = only ? [] : ball.compacts;
+    const lines = (await readLines(messageFile(id)))
+      .filter(message => keys.has(messageKey(message)))
       .sort(byTime);
     const upto = {};
-    for (const message of unseen)
+    for (const message of lines)
       upto[messageKey(message)] = Math.max(upto[messageKey(message)] ?? 0, message.seq);
-    const formatted = injectionText(pool, unseen, limit);
-    return { ...formatted, upto, count: unseen.length - formatted.omitted };
+    return {
+      ...injectionText(pool, { compacts, messages: lines }),
+      keys: [...keys],
+      compactIds: compacts.map(compact => compact.id),
+      upto,
+      count: lines.length + compacts.length,
+    };
   }
 
-  /** Records what a target was sent. */
-  const recordDelivery = (id, target, upto) =>
+  /**
+   * Replaces what a compression read (`snapshot`: the ball's sessions up to a
+   * message, and its compacts) with one compact holding `text`. Sessions fused
+   * in meanwhile stay as they are. A snapshot session that left the ball, or
+   * a compact that left it, means the ball changed under the compression, which
+   * is then dropped.
+   */
+  const seal = (id, ballId, snapshot, compact) =>
     serially(id, async () => {
       const pool = await load(id);
-      const key = sessionKey(target);
-      const sent = { ...pool.deliveries[key]?.sent };
-      for (const [source, seq] of Object.entries(upto))
-        sent[source] = Math.max(sent[source] ?? 0, seq);
-      pool.deliveries[key] = {
-        tool: target.tool,
-        id: target.id,
-        title: target.title,
-        cwd: target.cwd ?? null,
-        sent,
-        status: 'delivered',
-        at: new Date().toISOString(),
-      };
+      const ball = findBall(pool, ballId);
+      const inBall = new Set(
+        pool.sessions.filter(session => session.ball === ballId).map(sessionKey),
+      );
+      if (
+        !snapshot.keys.every(key => inBall.has(key)) ||
+        !snapshot.compactIds.every(cid => ball.compacts.some(item => item.id === cid))
+      )
+        throw failure('压缩期间这个球的组成变了，这次压缩作废', 409);
+      const sealed = pool.sessions.filter(session => snapshot.keys.includes(sessionKey(session)));
+      const from = [
+        ...ball.compacts
+          .filter(item => snapshot.compactIds.includes(item.id))
+          .flatMap(item => item.from),
+        ...sealed.map(({ tool, id: sessionId, title, cwd }) => ({
+          tool,
+          id: sessionId,
+          title,
+          cwd,
+        })),
+      ];
+      ball.compacts = [
+        ...ball.compacts.filter(item => !snapshot.compactIds.includes(item.id)),
+        { id: newId(), from, at: new Date().toISOString(), ...compact },
+      ];
+      pool.sessions = pool.sessions.filter(session => !snapshot.keys.includes(sessionKey(session)));
+      await dropMessages(id, new Set(snapshot.keys));
       await save(pool);
       return pool;
     });
@@ -256,13 +361,16 @@ export function createPools({ home = homeDir() } = {}) {
     remove,
     load,
     merge,
-    place,
+    placeBall,
+    fuseBalls,
+    splitSession,
     removeSession,
-    moveSession,
+    removeBall,
+    moveBall,
     knownIds,
     messages,
-    pending,
-    recordDelivery,
+    ballContent,
+    seal,
   };
 }
 
@@ -270,26 +378,32 @@ const byTime = (a, b) => (a.at || '').localeCompare(b.at || '') || a.seq - b.seq
 
 const TOOL_NAMES = { claude: 'Claude Code', codex: 'Codex' };
 const stamp = at => (at ? at.slice(5, 16).replace('T', ' ') : '');
+const labelOf = item => `${TOOL_NAMES[item.tool] || item.tool}·${item.title || item.id}`;
 
-/** Formats messages for injection, keeping the newest within `limit` characters. */
-export function injectionText(pool, messages, limit = Infinity) {
-  if (!messages.length) return { text: '', omitted: 0, chars: 0 };
+/** Formats a ball's compacts and messages as the text that starts a session. */
+export function injectionText(pool, { compacts = [], messages = [] }) {
+  if (!compacts.length && !messages.length) return { text: '', chars: 0 };
   const titles = new Map(pool.sessions.map(session => [sessionKey(session), session.title]));
   const label = message =>
-    `${TOOL_NAMES[message.tool] || message.tool}·${titles.get(messageKey(message)) || message.sessionId}`;
-  const blocks = messages.map(
-    message =>
-      `—— ${label(message)} · ${message.role === 'user' ? '用户' : 'AI'}${message.at ? ` · ${stamp(message.at)}` : ''}\n${message.text}`,
-  );
-  let start = 0;
-  let size = blocks.reduce((total, block) => total + block.length + 2, 0);
-  while (start < blocks.length - 1 && size > limit) size -= blocks[start++].length + 2;
-  const sources = [...new Set(messages.slice(start).map(label))].join('；');
+    labelOf({ tool: message.tool, id: message.sessionId, title: titles.get(messageKey(message)) });
+  const blocks = [
+    ...compacts.map(
+      compact => `—— 已压缩 · 来自 ${compact.from.map(labelOf).join('、')}\n${compact.text}`,
+    ),
+    ...messages.map(
+      message =>
+        `—— ${label(message)} · ${message.role === 'user' ? '用户' : 'AI'}${message.at ? ` · ${stamp(message.at)}` : ''}\n${message.text}`,
+    ),
+  ];
+  const sources = [
+    ...compacts.flatMap(compact => compact.from.map(labelOf)),
+    ...new Set(messages.map(label)),
+  ];
   const header = [
-    `${MARKER}来自池子「${pool.name}」的合并上下文：${sources}。共 ${blocks.length - start} 段，按时间排列。`,
-    ...(start ? [`更早的 ${start} 段因长度已省略。`] : []),
+    `${MARKER}来自池子「${pool.name}」的合并上下文：${[...new Set(sources)].join('；')}。`,
+    ...(compacts.length ? ['其中标“已压缩”的部分是压缩后的摘要，其余按时间排列。'] : []),
     '这是其他会话里的讨论记录，供你接着工作参考；若内容被另存为文件，请先完整读取再继续。',
   ].join('\n');
-  const text = `${header}\n\n${blocks.slice(start).join('\n\n')}`;
-  return { text, omitted: start, chars: text.length };
+  const text = `${header}\n\n${blocks.join('\n\n')}`;
+  return { text, chars: text.length };
 }

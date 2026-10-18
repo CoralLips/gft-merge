@@ -14,7 +14,7 @@
 import { open, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readJson } from '../home.mjs';
+import { COMPRESS, readJson } from '../home.mjs';
 import { openLink } from '../openLink.mjs';
 
 const failure = (message, status = 502) => Object.assign(new Error(message), { status });
@@ -277,8 +277,54 @@ export function createClaudeTool({
     // a folder hint can miss (it does for some of the app's sessions).
     async readMessages(session) {
       const api = await sdk();
-      const raw = await api.getSessionMessages(session.id, { includeSystemMessages: false });
-      return condense(raw || []);
+      const raw =
+        (await api.getSessionMessages(session.id, { includeSystemMessages: false })) || [];
+      return { messages: condense(raw), context: contextOf(raw) };
+    },
+
+    /** Model aliases the Claude Agent SDK accepts; an empty ID is the person's default. */
+    models: async () => [
+      { id: '', name: '默认' },
+      { id: 'haiku', name: 'Haiku' },
+      { id: 'sonnet', name: 'Sonnet' },
+      { id: 'opus', name: 'Opus' },
+    ],
+
+    /** One answer to the compression request, in a session that is not kept. */
+    async summarize({ text, model }) {
+      const api = await sdk();
+      let result = null;
+      for await (const message of api.query({
+        prompt: COMPRESS + text,
+        options: {
+          ...(model ? { model } : {}),
+          env: childEnvironment(),
+          settingSources: [],
+          tools: [],
+          maxTurns: 1,
+          persistSession: false,
+        },
+      }))
+        if (message.type === 'result') result = message;
+      if (!result || result.is_error || !result.result?.trim())
+        throw failure(`Claude 没有给出压缩结果：${result?.result || '没有返回'}`);
+      return result.result.trim();
     },
   };
+}
+
+/**
+ * A session's context size in tokens: what its last answer read and wrote, as
+ * the API reported it on that message.
+ */
+function contextOf(raw) {
+  const usage = raw.findLast(item => item.type === 'assistant' && item.message?.usage)?.message
+    ?.usage;
+  if (!usage) return null;
+  return (
+    (usage.input_tokens || 0) +
+    (usage.cache_creation_input_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) +
+    (usage.output_tokens || 0)
+  );
 }

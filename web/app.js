@@ -1,8 +1,8 @@
 // GFT-Merge page. Regions own their gestures: the tool buckets above belong to
 // the tools, the pool list and workspace below belong to us. The workspace is
-// a grid: a session dropped in waits in a cell; dragged into the middle it is
-// fused. Dragging anything up injects exactly what was dragged: one waiting
-// session, or the fused sessions. Every change shows at once; the server
+// a grid of balls: a session dropped in becomes a ball, a ball dropped on
+// another fuses into it, and a click compresses it. Dragging a ball up starts
+// a session with exactly what it holds. Every change shows at once; the server
 // follows, and a failure reloads the saved state.
 const $ = selector => document.querySelector(selector);
 const el = (tag, { dataset, ...props } = {}, ...children) => {
@@ -20,8 +20,11 @@ const state = {
   enabled: {},
 
   sessions: {}, // tool id → listed sessions
+  processors: null, // tools that can compress, with their models; read when the menu first opens
   busy: new Set(), // tool ids starting a session now
   fresh: null, // key of the session just started, shown with a brief highlight
+  compressing: new Set(), // ball ids this page asked to compress
+  processor: null, // { tool, model } that compresses
   pools: [],
   selectedId: null,
   dragging: false,
@@ -185,7 +188,8 @@ addEventListener('resize', () => {
 });
 
 // ---- Shared drag: a press becomes a drag after a few pixels ----
-function drag(event, { start, move, end }) {
+/** A press that never moves far enough is a click. */
+function drag(event, { start, move, end, click }) {
   const x0 = event.clientX;
   const y0 = event.clientY;
   let active = false;
@@ -202,7 +206,7 @@ function drag(event, { start, move, end }) {
   const onUp = e => {
     removeEventListener('pointermove', onMove);
     removeEventListener('pointerup', onUp);
-    if (!active) return;
+    if (!active) return click?.(e);
     state.dragging = false;
     document.body.classList.remove('dragging', 'removing', 'carrying-up', 'carrying-small');
     document.querySelectorAll('.target').forEach(node => node.classList.remove('target'));
@@ -233,65 +237,77 @@ const chip = item =>
     item.title,
   );
 
-// ---- Balls: hollow dashed vector circles ----
-// The fused ball grows with its number of sessions, which stays stable while
-// each session's content is compacted over time. It approaches a ceiling set by
-// the cell size and never reaches it.
-const SMALL = 14;
-const fusedRadius = (count, g) => {
-  const ceiling = Math.max(30, Math.min(g.w, g.h) * 0.45);
-  return ceiling - (ceiling - 24) / Math.max(1, count);
+// ---- Balls: hollow vector circles with their size in the middle ----
+// A ball grows with how many sessions it holds and approaches a ceiling set by
+// the cell, never reaching it. Dashed: plain sessions; solid: holds a compact.
+const BASE = 26;
+const membersOf = b => b.sessions.length + b.compacts.reduce((n, c) => n + c.from.length, 0);
+const radiusOf = (b, g) => {
+  const ceiling = Math.max(BASE + 4, Math.min(g.w, g.h) * 0.34);
+  return ceiling - (ceiling - BASE) / Math.max(1, membersOf(b));
 };
-function ball(r) {
+const short = n =>
+  n >= 1e6
+    ? `${(n / 1e6).toFixed(1)}M`
+    : n >= 1e4
+      ? `${Math.round(n / 1e3)}k`
+      : n >= 1e3
+        ? `${(n / 1e3).toFixed(1)}k`
+        : `${n}`;
+/**
+ * The number in a ball. One plain session shows its own context size, read from
+ * its tool; anything fused or compacted shows what dragging it up would send.
+ */
+function sizeOf(b) {
+  const single = b.sessions.length === 1 && !b.compacts.length ? b.sessions[0] : null;
+  if (single && Number.isFinite(single.context)) return short(single.context);
+  return b.tokens ? `≈${short(b.tokens)}` : '';
+}
+function nameOf(b) {
+  if (b.compacts.length) return `已压缩 · ${membersOf(b)} 个会话`;
+  const [first] = b.sessions;
+  return b.sessions.length > 1 ? `${first.title} 等 ${b.sessions.length} 个` : first?.title || '';
+}
+function ballSvg(r, { solid = false, spinning = false, label = '' } = {}) {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('width', 2 * r + 4);
   svg.setAttribute('height', 2 * r + 4);
-  svg.setAttribute('class', 'ball');
+  svg.setAttribute('class', `ball${solid ? ' solid' : ''}${spinning ? ' spinning' : ''}`);
   const circle = document.createElementNS(SVG, 'circle');
   circle.setAttribute('cx', r + 2);
   circle.setAttribute('cy', r + 2);
   circle.setAttribute('r', r);
-  svg.append(circle);
+  const text = document.createElementNS(SVG, 'text');
+  text.setAttribute('x', r + 2);
+  text.setAttribute('y', r + 2);
+  text.textContent = label;
+  svg.append(circle, text);
   return svg;
 }
 
-// ---- Workspace grid: the middle 2×2 block holds the fused sessions ----
-const CELL = 112;
+// ---- Workspace grid: every ball sits in a cell ----
+const CELL = 150;
 function grid() {
   const r = $('#workspace').getBoundingClientRect();
-  const cols = Math.max(5, Math.floor(r.width / CELL));
-  const rows = Math.max(3, Math.floor(r.height / CELL));
+  const cols = Math.max(3, Math.floor(r.width / CELL));
+  const rows = Math.max(2, Math.floor(r.height / CELL));
   const w = r.width / cols;
   const h = r.height / rows;
-  const c0 = Math.floor((cols - 2) / 2);
-  const r0 = Math.floor((rows - 2) / 2);
-  const middle = { left: c0 * w, top: r0 * h, width: 2 * w, height: 2 * h };
-  const reserved = new Set([
-    r0 * cols + c0,
-    r0 * cols + c0 + 1,
-    (r0 + 1) * cols + c0,
-    (r0 + 1) * cols + c0 + 1,
-  ]);
-  const center = i => ({ x: (i % cols) * w + w / 2, y: Math.floor(i / cols) * h + h / 2 });
-  return { rect: r, cols, rows, w, h, middle, reserved, center, count: cols * rows };
+  const center = i => ({ x: (i % cols) * w + w / 2, y: Math.floor(i / cols) * h + h / 2 - 12 });
+  return { rect: r, cols, rows, w, h, center, count: cols * rows };
 }
 const local = (g, e) => ({ x: e.clientX - g.rect.left, y: e.clientY - g.rect.top });
-const inMiddle = (g, p) =>
-  p.x >= g.middle.left &&
-  p.x <= g.middle.left + g.middle.width &&
-  p.y >= g.middle.top &&
-  p.y <= g.middle.top + g.middle.height;
 
-/** The free cell nearest to `p`; `except` is the dragged session's own key. */
+/** The free cell nearest to `p`; `except` is the dragged ball's own ID. */
 function nearestFree(g, p, except) {
   const taken = new Set(
-    (selected()?.sessions || [])
-      .filter(s => !s.fused && keyOf(s) !== except && Number.isInteger(s.cell))
-      .map(s => s.cell),
+    (selected()?.balls || [])
+      .filter(b => b.id !== except && Number.isInteger(b.cell))
+      .map(b => b.cell),
   );
   let best = null;
   for (let i = 0; i < g.count; i++) {
-    if (g.reserved.has(i) || taken.has(i)) continue;
+    if (taken.has(i)) continue;
     const c = g.center(i);
     const d = Math.hypot(c.x - p.x, c.y - p.y);
     if (!best || d < best.d) best = { i, d };
@@ -299,12 +315,23 @@ function nearestFree(g, p, except) {
   return best?.i ?? null;
 }
 
+/** The ball under the pointer, other than `except`, which a carried thing would fuse into. */
+function ballAt(e, except) {
+  const g = grid();
+  const p = local(g, e);
+  return (
+    (selected()?.balls || []).find(b => {
+      if (b.id === except || !Number.isInteger(b.cell)) return false;
+      const c = g.center(b.cell);
+      return Math.hypot(c.x - p.x, c.y - p.y) <= radiusOf(b, g) + 10;
+    }) || null
+  );
+}
+
 function showPreview(g, p, except) {
-  const fuse = inMiddle(g, p);
-  $('#workspace').classList.toggle('fusing', fuse);
-  // An <svg> has no `hidden` property, so the attribute is set directly.
   const preview = $('#preview');
-  const i = fuse ? null : nearestFree(g, p, except);
+  const i = nearestFree(g, p, except);
+  // An <svg> has no `hidden` property, so the attribute is set directly.
   preview.toggleAttribute('hidden', i === null);
   if (i === null) return;
   const c = g.center(i);
@@ -312,100 +339,108 @@ function showPreview(g, p, except) {
 }
 function hidePreview() {
   $('#preview').toggleAttribute('hidden', true);
-  $('#workspace').classList.remove('fusing', 'receiving');
+  $('#workspace').classList.remove('receiving');
 }
+/** While something is carried over the workspace: a ball to fuse into lights up, else the free cell shows. */
+function trackWorkspace(e, exceptBall) {
+  const into = ballAt(e, exceptBall);
+  document
+    .querySelectorAll('.orb.fuse-target')
+    .forEach(node => node.dataset.ball !== into?.id && node.classList.remove('fuse-target'));
+  if (into) {
+    $(`.orb[data-ball="${into.id}"]`)?.classList.add('fuse-target');
+    return $('#preview').toggleAttribute('hidden', true);
+  }
+  showPreview(grid(), local(grid(), e), exceptBall);
+}
+const clearFuseTarget = () =>
+  document.querySelectorAll('.fuse-target').forEach(node => node.classList.remove('fuse-target'));
 
 function renderGrid(g) {
   $('#gridlines').replaceChildren(
-    ...Array.from({ length: g.count }, (_, i) => i)
-      .filter(i => !g.reserved.has(i))
-      .map(i =>
-        el('div', {
-          className: 'cell',
-          style: `left:${(i % g.cols) * g.w}px;top:${Math.floor(i / g.cols) * g.h}px;width:${g.w}px;height:${g.h}px`,
-        }),
-      ),
-    el('div', {
-      className: 'cell middle',
-      style: `left:${g.middle.left}px;top:${g.middle.top}px;width:${g.middle.width}px;height:${g.middle.height}px`,
-    }),
+    ...Array.from({ length: g.count }, (_, i) =>
+      el('div', {
+        className: 'cell',
+        style: `left:${(i % g.cols) * g.w}px;top:${Math.floor(i / g.cols) * g.h}px;width:${g.w}px;height:${g.h}px`,
+      }),
+    ),
   );
 }
 
 function renderWorkspace() {
   const space = $('#workspace');
-  space.querySelectorAll('.item, .fused, .slot').forEach(node => node.remove());
+  space.querySelectorAll('.orb, .slot').forEach(node => node.remove());
   const g = grid();
   renderGrid(g);
   const pool = selected();
-  const middleCenter = {
-    x: g.middle.left + g.middle.width / 2,
-    y: g.middle.top + g.middle.height / 2,
-  };
-  const slot = text =>
-    space.append(
+  if (!pool?.balls.length)
+    return space.append(
       el('div', {
         className: 'slot',
-        style: `left:${middleCenter.x}px;top:${middleCenter.y}px`,
-        textContent: text,
+        style: `left:${g.rect.width / 2}px;top:${g.rect.height / 2}px`,
+        textContent: '把上面的会话拖到这里；把一个球拖到另一个球上＝融合',
       }),
     );
-  if (!pool) return slot('把上面的会话拖到这里');
-  const waiting = pool.sessions.filter(s => !s.fused);
-  const fused = pool.sessions.filter(s => s.fused);
-  // A waiting session without a valid free cell (new, or after a resize) gets the nearest one.
+  // A ball without a valid free cell (new, or after a resize) gets the nearest one.
   const used = new Set();
-  for (const session of waiting) {
-    const ok =
-      Number.isInteger(session.cell) &&
-      session.cell < g.count &&
-      !g.reserved.has(session.cell) &&
-      !used.has(session.cell);
-    if (!ok) session.cell = nearestFree(g, { x: 0, y: 0 }, keyOf(session));
-    used.add(session.cell);
+  for (const b of pool.balls) {
+    const ok = Number.isInteger(b.cell) && b.cell < g.count && !used.has(b.cell);
+    if (!ok) b.cell = nearestFree(g, { x: 0, y: 0 }, b.id);
+    used.add(b.cell);
   }
-  for (const session of waiting) {
-    const c = g.center(session.cell);
+  for (const b of pool.balls) {
+    const c = g.center(b.cell);
+    const r = radiusOf(b, g);
+    const spinning = b.compressing || state.compressing.has(b.id);
+    const svg = ballSvg(r, { solid: b.compacts.length > 0, spinning, label: sizeOf(b) });
+    svg.addEventListener('pointerdown', e => carryBall(e, b, node));
+    const name = el('span', { className: 'label', textContent: nameOf(b) });
+    const parts = membersOf(b) > 1 ? composition(b) : null;
     const node = el(
       'div',
       {
-        className: 'item',
-        style: `left:${c.x}px;top:${c.y}px`,
-        title: `${session.title}\n${session.cwd || ''}\n${session.messages ?? 0} 段`,
+        // In the lower half the composition opens up and to the side, inside the workspace.
+        className: c.y > g.rect.height / 2 ? 'orb up' : 'orb',
+        dataset: { ball: b.id },
+        style: `left:${c.x}px;top:${c.y}px;--r:${r}px`,
+        title: spinning ? '压缩中…' : '点一下＝压缩；拖到另一个球上＝融合；往上拖＝新建会话',
       },
-      ball(SMALL),
-      el('span', {
-        className: 'label',
-        textContent: session.title,
-        style: `max-width:${g.w - 8}px`,
-      }),
+      svg,
+      el('div', { className: 'name', style: `max-width:${g.w - 12}px` }, name, parts),
     );
-    node.addEventListener('pointerdown', e => carryWaiting(e, session, node));
     space.append(node);
   }
-  if (!fused.length) return slot(waiting.length ? '拖到这里＝融合' : '把上面的会话拖到这里');
-  const box = el(
+}
+
+/** The list shown when hovering a ball's name: compacts (sealed) and sessions (draggable out). */
+function composition(b) {
+  return el(
     'div',
-    {
-      className: 'fused',
-      style: `left:${middleCenter.x}px;top:${g.middle.top + 8}px;width:${g.middle.width}px`,
-      title: '拖到上面的会话＝注入；拖到工具名一栏＝新建会话',
-    },
-    ball(fusedRadius(fused.length, g)),
-    el('div', { className: 'caption', textContent: `已融合 ${fused.length} 段会话` }),
-    el(
-      'div',
-      { className: 'members' },
-      fused.map(session => {
-        const node = chip(session);
-        node.title = '拖出中间＝拆回待融合；往上拖＝只注入这一段；拖出工作区＝移出池子';
-        node.addEventListener('pointerdown', e => carryMember(e, session));
-        return node;
-      }),
+    { className: 'parts' },
+    ...b.compacts.map(compact =>
+      el(
+        'div',
+        { className: 'part sealed', title: '已压缩，不能拆开' },
+        `已压缩 · ${compact.from.map(f => f.title).join('、')}`,
+        el('span', { className: 'meta', textContent: ` ${short(compact.tokens)}` }),
+      ),
     ),
+    ...b.sessions.map(session => {
+      const node = el(
+        'div',
+        {
+          className: 'part',
+          title: '拖出去＝拆开；拖到另一个球上＝移过去；往上拖＝只用这一段新建会话',
+        },
+        chip(session),
+        Number.isFinite(session.context)
+          ? el('span', { className: 'meta', textContent: ` ${short(session.context)}` })
+          : null,
+      );
+      node.addEventListener('pointerdown', e => carryPart(e, b, session));
+      return node;
+    }),
   );
-  box.querySelector('.ball').addEventListener('pointerdown', e => carryFused(e, box));
-  space.append(box);
 }
 
 // ---- Where a carried thing would land ----
@@ -422,16 +457,19 @@ function highlight(target) {
     .forEach(node => node !== target && node.classList.remove('target'));
   target?.classList.add('target');
 }
-/** Tracks a waiting session or member while carried: snap preview, targets, removal warning. */
-function trackSmall(e, key) {
+/** Tracks anything carried from the workspace: fuse target or free cell inside, targets outside, removal warning. */
+function trackCarried(e, exceptBall) {
   const space = $('#workspace');
   const within = inside(space, e);
   const target = within ? null : targetAt(e, { pools: true });
   highlight(target);
   document.body.classList.toggle('carrying-up', !within && inside($('#top'), e));
   document.body.classList.toggle('removing', !within && !target && !inside($('#top'), e));
-  if (within) showPreview(grid(), local(grid(), e), key);
-  else hidePreview();
+  if (within) trackWorkspace(e, exceptBall);
+  else {
+    clearFuseTarget();
+    hidePreview();
+  }
   edgePan(e);
 }
 let edgeTimer = null;
@@ -446,24 +484,33 @@ function edgePan(e) {
 // ---- Actions ----
 const listed = target =>
   (state.sessions[target.dataset.tool] || []).find(s => s.id === target.dataset.id);
+const poolPath = (...parts) =>
+  `/api/pools/${selected().id}${parts.length ? '/' : ''}${parts.join('/')}`;
+/** Applies a pool the server returned in place of the local one. */
+function adopt(pool) {
+  if (!pool?.id) return;
+  state.pools = state.pools.map(p => (p.id === pool.id ? pool : p));
+  render();
+}
 
 /**
- * Starts a session in the bucket's tool whose first message is the pool (or,
+ * Starts a session in the bucket's tool whose first message is the ball (or,
  * with `source`, one session of it). Sending into existing sessions is left
  * out: Codex refuses a session open in its app, and the Claude app does not
  * show what another program writes into one of its sessions.
  */
-async function injectInto(target, source) {
-  const pool = selected();
+async function injectInto(target, ballId, source) {
   const tool = target.dataset.tool;
   // The drop lands at once: the bucket gives a short knock and spins until the session exists.
   state.busy.add(tool);
   renderTools();
   pulse(tool, 'hit');
-  const result = await commit(() => api('POST', `/api/pools/${pool.id}/inject`, { tool, source }));
+  const result = await commit(() =>
+    api('POST', poolPath('inject'), { tool, ball: ballId, source }),
+  );
   state.busy.delete(tool);
   await loadPools();
-  if (result?.status === 'nothing-new') toast('对方已经有这些内容');
+  if (result?.status === 'nothing-new') toast('这个球里没有内容');
   if (result?.status !== 'sent') {
     renderTools();
     return pulse(tool, 'shake');
@@ -484,61 +531,143 @@ async function injectInto(target, source) {
 
 /** Plays a one-off animation on a tool's bucket: 'hit' when something lands, 'shake' on failure. */
 function pulse(tool, kind) {
-  const bucket = $(`.bucket[data-tool="${tool}"]`);
-  if (!bucket) return;
-  bucket.classList.remove('hit', 'shake');
-  void bucket.offsetWidth; // restart the animation if it is already playing
-  bucket.classList.add(kind);
-  bucket.addEventListener('animationend', () => bucket.classList.remove(kind), { once: true });
+  shakeNode($(`.bucket[data-tool="${tool}"]`), kind);
+}
+function shakeNode(node, kind = 'shake') {
+  if (!node) return;
+  node.classList.remove('hit', 'shake');
+  void node.offsetWidth; // restart the animation if it is already playing
+  node.classList.add(kind);
+  node.addEventListener('animationend', () => node.classList.remove(kind), { once: true });
 }
 
-/** Puts a session of the selected pool in the middle (fused) or a cell (waiting). */
-function placeLocally(session, e) {
-  const g = grid();
-  const p = local(g, e);
-  if (inMiddle(g, p)) {
-    session.fused = true;
-    session.cell = null;
-  } else {
-    session.fused = false;
-    session.cell = nearestFree(g, p, keyOf(session));
-  }
+/** Compresses a ball with the processing tool; it spins until the compact replaces its content. */
+async function compressBall(b) {
+  if (b.compressing || state.compressing.has(b.id)) return;
+  if (!b.sessions.length && b.compacts.length < 2) return toast('这个球已经压缩过了');
+  state.compressing.add(b.id);
+  renderWorkspace();
+  const pool = await commit(() => api('POST', poolPath('compress'), { ball: b.id }));
+  state.compressing.delete(b.id);
+  if (pool) return adopt(pool);
+  renderWorkspace();
+  shakeNode($(`.orb[data-ball="${b.id}"]`));
+}
+
+/** Fuses ball `from` into ball `into`, shown at once. */
+function fuseLocally(from, into) {
+  into.sessions.push(...from.sessions);
+  into.compacts.push(...from.compacts);
+  selected().balls = selected().balls.filter(b => b !== from);
   render();
-  return { fused: session.fused, cell: session.cell };
+  commit(() => api('POST', poolPath('fuse'), { from: from.id, into: into.id })).then(adopt);
 }
 
-function removeLocally(session) {
-  const pool = selected();
-  pool.sessions = pool.sessions.filter(s => keyOf(s) !== keyOf(session));
-  render();
-  commit(
-    () => api('DELETE', `/api/pools/${pool.id}/sessions/${encodeURIComponent(keyOf(session))}`),
-    () => `已移出「${session.title}」`,
-  );
+/** A whole ball carried: onto a ball fuses, into a free cell moves, up starts a session, onto a pool moves there, out removes it. */
+function carryBall(event, b, node) {
+  event.stopPropagation();
+  drag(event, {
+    click: () => compressBall(b),
+    start: () => {
+      document.body.classList.add('carrying-small');
+      node.classList.add('lifted');
+    },
+    move: e => {
+      const p = local(grid(), e);
+      Object.assign(node.style, { left: `${p.x}px`, top: `${p.y}px` });
+      trackCarried(e, b.id);
+    },
+    end: e => {
+      clearInterval(edgeTimer);
+      clearFuseTarget();
+      const pool = selected();
+      if (inside($('#workspace'), e)) {
+        const into = ballAt(e, b.id);
+        if (into) return fuseLocally(b, into);
+        const cell = nearestFree(grid(), local(grid(), e), b.id);
+        b.cell = cell;
+        render();
+        return commit(() => api('PATCH', poolPath('balls', b.id), { cell })).then(adopt);
+      }
+      const target = targetAt(e, { pools: true });
+      if (target?.matches('.pool-item')) {
+        pool.balls = pool.balls.filter(item => item !== b);
+        render();
+        return commit(
+          () => api('POST', poolPath('move'), { ball: b.id, to: target.dataset.id }),
+          () => `已把「${nameOf(b)}」移到另一个池子`,
+        ).then(loadPools);
+      }
+      if (target) {
+        render();
+        return injectInto(target, b.id);
+      }
+      if (inside($('#top'), e)) return render(); // let go above but not on a target: back it goes
+      pool.balls = pool.balls.filter(item => item !== b);
+      render();
+      commit(
+        () => api('DELETE', poolPath('balls', b.id)),
+        () => `已移出「${nameOf(b)}」`,
+      ).then(adopt);
+    },
+  });
 }
 
-function moveLocally(session, toId) {
-  const from = selected();
-  const to = state.pools.find(pool => pool.id === toId);
-  from.sessions = from.sessions.filter(s => keyOf(s) !== keyOf(session));
-  to.sessions.push({ ...session, fused: false, cell: null });
-  render();
-  commit(
-    () => api('POST', `/api/pools/${from.id}/move`, { key: keyOf(session), to: toId }),
-    () => `已把「${session.title}」移到「${to.name}」`,
-  ).then(loadPools);
+/** One session carried out of a ball's list: onto a ball moves it there, into a free cell splits it off, up starts a session with it alone, out removes it. */
+function carryPart(event, b, session) {
+  event.stopPropagation();
+  const key = keyOf(session);
+  drag(event, {
+    start: e => {
+      document.body.classList.add('carrying-small');
+      showGhost(chip(session));
+      moveGhost(e);
+    },
+    move: e => {
+      moveGhost(e);
+      trackCarried(e, b.id);
+    },
+    end: e => {
+      clearInterval(edgeTimer);
+      clearFuseTarget();
+      ghost.hidden = true;
+      const pool = selected();
+      if (inside($('#workspace'), e)) {
+        const into = ballAt(e, b.id);
+        if (!into && ballAt(e) === b) return render(); // let go on its own ball: nothing changes
+        const cell = into ? undefined : nearestFree(grid(), local(grid(), e), null);
+        b.sessions = b.sessions.filter(s => keyOf(s) !== key);
+        if (into) into.sessions.push(session);
+        else
+          pool.balls.push({
+            id: `local-${Date.now()}`,
+            cell,
+            sessions: [session],
+            compacts: [],
+            tokens: 0,
+          });
+        render();
+        return commit(() => api('POST', poolPath('split'), { key, ball: into?.id, cell })).then(
+          adopt,
+        );
+      }
+      const target = targetAt(e);
+      if (target) {
+        render();
+        return injectInto(target, b.id, key);
+      }
+      if (inside($('#top'), e)) return render();
+      b.sessions = b.sessions.filter(s => keyOf(s) !== key);
+      render();
+      commit(
+        () => api('DELETE', poolPath('sessions', encodeURIComponent(key))),
+        () => `已移出「${session.title}」`,
+      ).then(adopt);
+    },
+  });
 }
 
-/** What happens when a waiting session or a member is let go outside its own spot. */
-function dropSmall(session, e) {
-  const target = targetAt(e, { pools: true });
-  if (target?.matches('.pool-item')) return moveLocally(session, target.dataset.id);
-  if (target) return injectInto(target, keyOf(session));
-  if (inside($('#top'), e)) return render(); // let go above but not on a target: back it goes
-  return removeLocally(session);
-}
-
-// A session row dragged down into the workspace joins the selected pool.
+// A session row dragged down into the workspace joins the selected pool: onto a ball it fuses, elsewhere it is a new ball.
 $('#rail').addEventListener('pointerdown', event => {
   const row = event.target.closest('.session');
   if (!row) return;
@@ -552,124 +681,51 @@ $('#rail').addEventListener('pointerdown', event => {
       moveGhost(e);
       const within = inside($('#workspace'), e);
       $('#workspace').classList.toggle('receiving', within);
-      if (within) showPreview(grid(), local(grid(), e), keyOf(item));
-      else hidePreview();
+      if (within) trackWorkspace(e, null);
+      else {
+        clearFuseTarget();
+        hidePreview();
+      }
     },
     end: async e => {
       ghost.hidden = true;
+      clearFuseTarget();
       if (!inside($('#workspace'), e)) return;
       let pool = selected();
-      if (pool?.sessions.some(s => keyOf(s) === keyOf(item))) return toast('这段会话已经在池子里');
+      if (pool?.balls.some(b => b.sessions.some(s => keyOf(s) === keyOf(item))))
+        return toast('这段会话已经在池子里');
       if (!pool) {
         // A new pool appears at once; the server confirms it.
-        pool = { id: `local-${Date.now()}`, name: item.title, sessions: [], deliveries: [] };
+        pool = { id: `local-${Date.now()}`, name: item.title, balls: [] };
         state.pools.unshift(pool);
         state.selectedId = pool.id;
       }
-      const session = { ...item, messages: null };
-      pool.sessions.push(session);
-      const place = placeLocally(session, e);
-      await commit(async () => {
+      const into = ballAt(e, null);
+      const cell = into ? undefined : nearestFree(grid(), local(grid(), e), null);
+      const session = { ...item };
+      if (into) into.sessions.push(session);
+      else
+        pool.balls.push({
+          id: `local-${Date.now()}`,
+          cell,
+          sessions: [session],
+          compacts: [],
+          tokens: 0,
+        });
+      render();
+      const result = await commit(async () => {
         if (pool.id.startsWith('local-')) {
           const created = await api('POST', '/api/pools', { name: pool.name });
           pool.id = created.id;
           state.selectedId = created.id;
           store.set('gft-merge:selected', created.id);
         }
-        return api('POST', `/api/pools/${pool.id}/sessions`, { ...item, ...place });
+        return api('POST', `/api/pools/${pool.id}/sessions`, { ...item, ball: into?.id, cell });
       });
-      await loadPools();
+      if (result) adopt(result.pool);
     },
   });
 });
-
-function carryWaiting(event, session, node) {
-  event.stopPropagation();
-  const before = { fused: session.fused, cell: session.cell };
-  drag(event, {
-    start: () => {
-      document.body.classList.add('carrying-small');
-      node.classList.add('lifted');
-    },
-    move: e => {
-      const p = local(grid(), e);
-      Object.assign(node.style, { left: `${p.x}px`, top: `${p.y}px` });
-      trackSmall(e, keyOf(session));
-    },
-    end: e => {
-      clearInterval(edgeTimer);
-      if (!inside($('#workspace'), e)) return dropSmall(session, e);
-      const place = placeLocally(session, e);
-      if (place.fused === before.fused && place.cell === before.cell) return;
-      commit(
-        () =>
-          api(
-            'PATCH',
-            `/api/pools/${selected().id}/sessions/${encodeURIComponent(keyOf(session))}`,
-            place,
-          ),
-        () => (place.fused ? `已融合「${session.title}」` : null),
-      );
-    },
-  });
-}
-
-function carryMember(event, session) {
-  event.stopPropagation();
-  drag(event, {
-    start: e => {
-      document.body.classList.add('carrying-small');
-      showGhost(chip(session));
-      moveGhost(e);
-    },
-    move: e => {
-      moveGhost(e);
-      trackSmall(e, keyOf(session));
-    },
-    end: e => {
-      clearInterval(edgeTimer);
-      ghost.hidden = true;
-      if (!inside($('#workspace'), e)) return dropSmall(session, e);
-      if (inMiddle(grid(), local(grid(), e))) return;
-      const place = placeLocally(session, e);
-      commit(
-        () =>
-          api(
-            'PATCH',
-            `/api/pools/${selected().id}/sessions/${encodeURIComponent(keyOf(session))}`,
-            place,
-          ),
-        () => `「${session.title}」已拆回待融合，不再随融合内容注入`,
-      );
-    },
-  });
-}
-
-/** The fused ball travels up; rows and bucket headers light up under it. */
-function carryFused(event, box) {
-  event.stopPropagation();
-  let target = null;
-  drag(event, {
-    start: e => {
-      document.body.classList.add('carrying-up');
-      box.classList.add('lifted');
-      showGhost(ball(16));
-      moveGhost(e);
-    },
-    move: e => {
-      moveGhost(e);
-      target = targetAt(e);
-      highlight(target);
-      edgePan(e);
-    },
-    end: () => {
-      clearInterval(edgeTimer);
-      ghost.hidden = true;
-      box.classList.remove('lifted');
-      if (target) injectInto(target);
-    },
-  });
-}
 
 // ---- Bottom: pool list ----
 function renderList() {
@@ -684,7 +740,10 @@ function renderList() {
           onclick: () => select(pool.id),
         },
         name,
-        el('span', { className: 'meta', textContent: `${pool.sessions.length}` }),
+        el('span', {
+          className: 'meta',
+          textContent: `${pool.balls.reduce((n, b) => n + membersOf(b), 0)}`,
+        }),
         el('button', {
           className: 'edit',
           textContent: '✎',
@@ -781,6 +840,41 @@ function renderMenu() {
     ),
   );
 }
+/** The processing tool: one choice of tool and model, listed once the menu first opens. */
+function renderProcessor() {
+  const select = $('#processor');
+  const current = state.processor ? `${state.processor.tool}|${state.processor.model}` : '';
+  if (!state.processors) {
+    select.replaceChildren(el('option', { textContent: '读取中…' }));
+    return;
+  }
+  select.replaceChildren(
+    ...state.processors.map(item =>
+      el(
+        'optgroup',
+        { label: item.name },
+        ...item.models.map(model =>
+          el('option', {
+            value: `${item.tool}|${model.id}`,
+            textContent: `${item.name} · ${model.name}`,
+            selected: `${item.tool}|${model.id}` === current,
+          }),
+        ),
+      ),
+    ),
+  );
+}
+$('#processor').addEventListener('change', event => {
+  const [tool, model] = event.target.value.split('|');
+  state.processor = { tool, model };
+  commit(() => api('PUT', '/api/settings', { processor: state.processor }));
+});
+$('#menu').addEventListener('toggle', async () => {
+  if (!$('#menu').open || state.processors) return;
+  renderProcessor();
+  state.processors = await api('GET', '/api/processors').catch(() => []);
+  renderProcessor();
+});
 $('#menu').addEventListener('keydown', event => {
   if (event.key === 'Escape') $('#menu').open = false;
 });
@@ -827,6 +921,7 @@ async function loadSessions() {
 const initial = await api('GET', '/api/state');
 state.tools = initial.tools;
 state.enabled = initial.settings.tools;
+state.processor = initial.settings.processor;
 state.selectedId = store.get('gft-merge:selected');
 renderMenu();
 await loadPools();
