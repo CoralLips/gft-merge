@@ -278,6 +278,7 @@ test('Codex 新建：用默认模型开会话、起名、发出第一条；不�
     ['model/list', 'thread/start', 'thread/name/set', 'turn/start'],
   );
   assert.equal(codex.requests[1][1].model, 'gpt-test');
+  assert.match(codex.requests[3][1].input[0].text, /内容[\s\S]*汇报你的理解[\s\S]*等我的指示/);
   assert.equal(created.session.id, 'new-thread');
   assert.equal(created.session.title, 'merge · 交接');
   assert.equal(codex.closed(), 0, '回复没结束前不能断开，否则回复会被打断');
@@ -308,7 +309,7 @@ test('Claude 新建走 SDK 的一轮对话：起好名字，再用桌面端的�
     text: `${MARKER}内容`,
   });
   assert.equal(created.session.id, 'c-new');
-  assert.match(calls[0].prompt, /内容[\s\S]*已收到/);
+  assert.match(calls[0].prompt, /内容[\s\S]*汇报你的理解[\s\S]*等我的指示/);
   assert.equal(calls[0].options.cwd, 'D:/work');
   assert.ok(!('CLAUDECODE' in calls[0].options.env), '不沿用父会话的环境');
   assert.deepEqual(renamed, [['c-new', 'merge · 交接']]);

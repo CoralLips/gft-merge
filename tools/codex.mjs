@@ -4,7 +4,7 @@
 import { spawn } from 'node:child_process';
 import { open as openFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { COMPRESS } from '../home.mjs';
+import { BRIEF, COMPRESS } from '../home.mjs';
 import { openLink } from '../openLink.mjs';
 
 const failure = (message, status = 502, extra = {}) =>
@@ -163,7 +163,6 @@ export function turnMessages(turn) {
 /** Codex quits at start when another app-server is setting up its state database. */
 const startupClash = error => /initialize (sqlite )?state runtime/i.test(error.codexMessage || '');
 
-/** Asked with each sent message, so the reply is short. */
 /** A session's context size: the last token count Codex wrote into its rollout file. */
 async function contextOf(file) {
   const handle = await openFile(file).catch(() => null);
@@ -184,7 +183,6 @@ async function contextOf(file) {
   }
 }
 
-const ACK = '\n\n请只回复一句：已收到，并说明来自哪些会话、共几段。';
 const TURN_MS = 15 * 60 * 1000;
 
 export function createCodexTool({
@@ -230,7 +228,10 @@ export function createCodexTool({
       TURN_MS,
     );
     try {
-      await server.request('turn/start', { threadId, input: [{ type: 'text', text: text + ACK }] });
+      await server.request('turn/start', {
+        threadId,
+        input: [{ type: 'text', text: text + BRIEF }],
+      });
     } catch (error) {
       server.close();
       throw error;

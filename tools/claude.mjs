@@ -14,7 +14,7 @@
 import { open, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { COMPRESS, readJson } from '../home.mjs';
+import { BRIEF, COMPRESS, readJson } from '../home.mjs';
 import { openLink } from '../openLink.mjs';
 
 const failure = (message, status = 502) => Object.assign(new Error(message), { status });
@@ -24,8 +24,6 @@ const failure = (message, status = 502) => Object.assign(new Error(message), { s
 const PARENT_SESSION = /^(CLAUDECODE$|CLAUDE_PID$|CLAUDE_AGENT_SDK_|CLAUDE_CODE_)/;
 export const childEnvironment = (env = process.env) =>
   Object.fromEntries(Object.entries(env).filter(([name]) => !PARENT_SESSION.test(name)));
-/** Asked with each sent message, so the reply is short. */
-const ACK = '\n\n请只回复一句：已收到，并说明来自哪些会话、共几段。';
 
 const dateOf = value => (typeof value === 'number' ? new Date(value).toISOString() : value || null);
 
@@ -210,7 +208,7 @@ async function run(api, text, options) {
   let sessionId = null;
   let result = null;
   for await (const message of api.query({
-    prompt: text + ACK,
+    prompt: text + BRIEF,
     options: { ...options, env: childEnvironment(), settingSources: [], tools: [], maxTurns: 1 },
   })) {
     sessionId ||= message.session_id || null;
