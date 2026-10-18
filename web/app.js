@@ -22,6 +22,7 @@ const state = {
   sessions: {}, // tool id → listed sessions
   processors: null, // tools that can compress, with their models; read when the menu first opens
   busy: new Set(), // tool ids starting a session now
+  unavailable: {}, // tool id → why its sessions could not be read
   fresh: null, // key of the session just started, shown with a brief highlight
   compressing: new Set(), // ball ids this page asked to compress
   processor: null, // { tool, model } that compresses
@@ -117,7 +118,7 @@ function renderTools() {
           state.busy.has(tool.id) ? el('span', { className: 'spinner' }) : null,
           el('span', {
             className: 'count',
-            textContent: loaded ? `${sessions.length} 个会话` : '',
+            textContent: loaded && !state.unavailable[tool.id] ? `${sessions.length} 个会话` : '',
           }),
         );
         const rows = sessions.map(item =>
@@ -149,7 +150,10 @@ function renderTools() {
             {},
             rows.length
               ? rows
-              : el('li', { className: 'empty', textContent: loaded ? '最近没有会话' : '读取中…' }),
+              : el('li', {
+                  className: 'empty',
+                  textContent: !loaded ? '读取中…' : state.unavailable[tool.id] || '最近没有会话',
+                }),
           ),
         );
       }),
@@ -919,11 +923,14 @@ async function loadSessions() {
     state.tools
       .filter(tool => state.enabled[tool.id] !== false)
       .map(async tool => {
+        // A tool that can't be read (not installed, say) says so in its own column, without a popup each time.
         try {
           state.sessions[tool.id] = await api('GET', `/api/sessions?tool=${tool.id}`);
+          delete state.unavailable[tool.id];
         } catch (error) {
           state.sessions[tool.id] = [];
-          toast(`${tool.name}：${error.message}`);
+          state.unavailable[tool.id] =
+            `${error.message}不用这个工具的话，可以在右上角设置里关掉这一栏。`;
         }
       }),
   );

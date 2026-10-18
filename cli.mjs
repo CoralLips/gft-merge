@@ -8,16 +8,19 @@ import { fileURLToPath } from 'node:url';
 import { homeDir, readJson, writeJson } from './home.mjs';
 import { DEFAULT_PORT, startServer } from './server.mjs';
 
-const [command = 'open', ...rest] = process.argv.slice(2);
+// The command may be left out, as in `gft-merge --port 4329`: then it is `open`.
+const args = process.argv.slice(2);
+const command = args[0] && !args[0].startsWith('--') ? args[0] : 'open';
+const portAt = args.indexOf('--port');
 const port =
-  Number(rest[rest.indexOf('--port') + 1]) || Number(process.env.GFT_MERGE_PORT) || DEFAULT_PORT;
+  (portAt >= 0 && Number(args[portAt + 1])) || Number(process.env.GFT_MERGE_PORT) || DEFAULT_PORT;
 const url = `http://127.0.0.1:${port}`;
 const serviceFile = path.join(homeDir(), 'service.json');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const portTaken = () =>
   new Error(
-    `端口 ${port} 已被其他程序占用，GFT-Merge 没有启动。请换一个端口，例如：node cli.mjs open --port ${port + 10}`,
+    `端口 ${port} 已被其他程序占用，GFT-Merge 没有启动。请换一个端口，例如：npx gft-merge --port ${port + 10}`,
   );
 
 /** Whether anything listens on the port, without speaking HTTP to it. */
