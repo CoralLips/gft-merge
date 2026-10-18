@@ -239,7 +239,7 @@ const chip = item =>
 
 // ---- Balls: hollow vector circles with their size in the middle ----
 // A ball grows with how many sessions it holds and approaches a ceiling set by
-// the cell, never reaching it. Dashed: plain sessions; solid: holds a compact.
+// the cell, never reaching it. While it is compressed, its dashed ring turns.
 const BASE = 26;
 const membersOf = b => b.sessions.length + b.compacts.reduce((n, c) => n + c.from.length, 0);
 const radiusOf = (b, g) => {
@@ -263,16 +263,16 @@ function sizeOf(b) {
   if (single && Number.isFinite(single.context)) return short(single.context);
   return b.tokens ? `≈${short(b.tokens)}` : '';
 }
-function nameOf(b) {
-  if (b.compacts.length) return `已压缩 · ${membersOf(b)} 个会话`;
-  const [first] = b.sessions;
-  return b.sessions.length > 1 ? `${first.title} 等 ${b.sessions.length} 个` : first?.title || '';
-}
-function ballSvg(r, { solid = false, spinning = false, label = '' } = {}) {
+/** The names of the sessions a ball holds, compacted ones included; the label cuts them short. */
+const nameOf = b =>
+  [...b.compacts.flatMap(c => c.from.map(f => f.title)), ...b.sessions.map(s => s.title)].join(
+    '、',
+  );
+function ballSvg(r, { spinning = false, label = '' } = {}) {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('width', 2 * r + 4);
   svg.setAttribute('height', 2 * r + 4);
-  svg.setAttribute('class', `ball${solid ? ' solid' : ''}${spinning ? ' spinning' : ''}`);
+  svg.setAttribute('class', `ball${spinning ? ' spinning' : ''}`);
   const circle = document.createElementNS(SVG, 'circle');
   circle.setAttribute('cx', r + 2);
   circle.setAttribute('cy', r + 2);
@@ -392,10 +392,13 @@ function renderWorkspace() {
     const c = g.center(b.cell);
     const r = radiusOf(b, g);
     const spinning = b.compressing || state.compressing.has(b.id);
-    const svg = ballSvg(r, { solid: b.compacts.length > 0, spinning, label: sizeOf(b) });
+    const svg = ballSvg(r, { spinning, label: sizeOf(b) });
     svg.addEventListener('pointerdown', e => carryBall(e, b, node));
-    const name = el('span', { className: 'label', textContent: nameOf(b) });
-    const parts = membersOf(b) > 1 ? composition(b) : null;
+    const name = el('span', {
+      className: spinning ? 'label compressing' : 'label',
+      textContent: spinning ? '压缩中…' : nameOf(b),
+    });
+    const parts = membersOf(b) > 1 || b.compacts.length ? composition(b) : null;
     const node = el(
       'div',
       {
@@ -544,7 +547,6 @@ function shakeNode(node, kind = 'shake') {
 /** Compresses a ball with the processing tool; it spins until the compact replaces its content. */
 async function compressBall(b) {
   if (b.compressing || state.compressing.has(b.id)) return;
-  if (!b.sessions.length && b.compacts.length < 2) return toast('这个球已经压缩过了');
   state.compressing.add(b.id);
   renderWorkspace();
   const pool = await commit(() => api('POST', poolPath('compress'), { ball: b.id }));

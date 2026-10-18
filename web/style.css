@@ -377,9 +377,6 @@ body.dragging #gridlines {
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
 }
-.ball.solid circle {
-  stroke-dasharray: none;
-}
 .ball text {
   fill: var(--text);
   font-size: 13px;
@@ -419,6 +416,9 @@ body.dragging #gridlines {
   position: relative;
   font-size: 12px;
   color: var(--muted);
+}
+.orb .label.compressing {
+  color: var(--accent);
 }
 .orb .label {
   display: block;

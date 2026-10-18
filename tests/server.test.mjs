@@ -129,6 +129,14 @@ test('点球压缩：用设置里的处理工具和模型调一次，球变成�
     assert.equal(ball.compacts[0].text, undefined, '列表里不带压缩全文');
     await call('POST', `/api/pools/${pool.id}/inject`, { tool: 'claude', ball: ballId });
     assert.match(claude.sent.at(-1).text, /已压缩[\s\S]*摘要（m1）/);
+    const again = await call('POST', `/api/pools/${pool.id}/compress`, { ball: ballId });
+    assert.equal(again.balls[0].compacts.length, 1, '可以一直压下去，压完还是一个压缩块');
+    assert.deepEqual(
+      again.balls[0].compacts[0].from.map(f => f.id),
+      ['c1'],
+      '来源会话一直记着',
+    );
+    assert.match(codex.sent.at(-1).text, /摘要（m1）/, '再压时压的是上一次的压缩结果');
   }));
 
 test('整个球可以搬到另一个池子，也可以整个移出', () =>
