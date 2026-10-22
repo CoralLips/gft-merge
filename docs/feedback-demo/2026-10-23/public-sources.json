@@ -1,0 +1,33 @@
+{
+  "notice": "Original fictional demonstration inputs. These were supplied through isolated fixture adapters, not taken from private history or claimed to be genuine prior Claude/Codex runs.",
+  "conversations": [
+    {
+      "tool": "claude",
+      "title": "虚构演示｜接口约束与方案",
+      "messages": [
+        {
+          "role": "user",
+          "text": "公开虚构演示，不含真实客户材料。结算回调服务有两个 Worker；同一 event_id 重复到达只能入账一次。必须保持现有 HTTP 接口，不引入消息队列。接手时只复述当前判断与下一步，不执行代码，不调用工具。"
+        },
+        {
+          "role": "assistant",
+          "text": "已定方案：以 event_id 的数据库唯一约束和事务做幂等，不能只靠进程内锁。保持现有 HTTP 接口，不引入队列。验收至少覆盖同一事件重放和两个 Worker 同时处理。"
+        }
+      ]
+    },
+    {
+      "tool": "codex",
+      "title": "虚构演示｜并发审查发现",
+      "messages": [
+        {
+          "role": "user",
+          "text": "同一个公开虚构演示的审查结果：现有实现只使用进程内锁，两个 Worker 同时收到同一 event_id 时仍可能重复入账。请把这一未解决的问题交给下一场会话；现在不要修改或运行代码。"
+        },
+        {
+          "role": "assistant",
+          "text": "审查结论：进程内锁无法跨 Worker。待办是补数据库唯一约束与原子事务，并写重复事件、并发 Worker 两组回归。修复尚未实施；既有接口和“不引入队列”约束继续有效。"
+        }
+      ]
+    }
+  ]
+}
