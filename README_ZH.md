@@ -1,6 +1,11 @@
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong></p>
 
-# GFT-Merge
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CoralLips/gft-merge/main/docs/brand/wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/CoralLips/gft-merge/main/docs/brand/wordmark-light.svg" alt="GFT-Merge" width="240" height="42">
+  </picture>
+</h1>
 
 ## 让上下文在 AI 编程会话之间流动。
 

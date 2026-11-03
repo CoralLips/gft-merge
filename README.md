@@ -1,6 +1,11 @@
 <p align="center"><strong>English</strong> · <a href="README_ZH.md">简体中文</a></p>
 
-# GFT-Merge
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/CoralLips/gft-merge/main/docs/brand/wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/CoralLips/gft-merge/main/docs/brand/wordmark-light.svg" alt="GFT-Merge" width="240" height="42">
+  </picture>
+</h1>
 
 ## Carry context between your AI coding sessions.
 

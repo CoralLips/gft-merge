@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">GFT-Merge</title>
+  <rect width="64" height="64" rx="13" fill="#11262a"/>
+  <g transform="translate(4.56 15.2) scale(1.12)"><g fill="none" stroke-width="2.7"><circle cx="16" cy="15" r="12.5" stroke="#f6f3eb"/><circle cx="33" cy="15" r="12.5" stroke="#ff895c"/></g></g>
+</svg>
