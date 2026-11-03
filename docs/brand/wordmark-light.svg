@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="208" height="36" viewBox="0 0 208 36" role="img" aria-labelledby="title">
-  <title id="title">GFT MERGE</title>
+  <title id="title">GFT-Merge</title>
   <g transform="translate(0 3)"><g fill="none" stroke-width="2.7"><circle cx="16" cy="15" r="12.5" stroke="#11262a"/><circle cx="33" cy="15" r="12.5" stroke="#b94e2e"/></g></g>
-  <text x="66" y="25.4" fill="#11262a" font-family="Consolas, 'Liberation Mono', monospace" font-size="23" font-weight="600" letter-spacing="2" textLength="132" lengthAdjust="spacing">GFT MERGE</text>
+  <text x="66" y="25.4" fill="#11262a" font-family="Consolas, 'Liberation Mono', monospace" font-size="23" font-weight="600" letter-spacing="2" textLength="132" lengthAdjust="spacing">GFT-Merge</text>
 </svg>
