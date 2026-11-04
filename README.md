@@ -17,6 +17,8 @@ It runs on your computer and opens in your browser. A sibling of [GFT-Map](https
 
 Choose **中文** or **EN** under **Settings → Language**. Your browser remembers your choice.
 
+<a href="https://www.youtube.com/watch?v=p5dRAMX7D2U"><img src="docs/gft-merge-demo-en.jpg" width="640" alt="Dragging a Codex session onto a Claude Code session to merge them"><br>▶ Watch the 35-second demo on YouTube</a>
+
 ## Get started
 
 You'll need **Node.js 22+** and at least one of:
