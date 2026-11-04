@@ -15,6 +15,10 @@
 
 在你自己的电脑上运行，在浏览器里打开。和 [GFT-Map](https://github.com/CoralLips/gft-map) 是同一系列的工具。
 
+在右上角 **设置 → 语言** 里可以选择 **中文** 或 **EN**，浏览器会记住你的选择。
+
+<a href="https://www.youtube.com/watch?v=5G7kbVYJK2E"><img src="docs/gft-merge-demo-zh.jpg" width="640" alt="Claude 和 Codex 的两颗会话球即将碰合"><br>▶ 在 YouTube 观看中文演示（35 秒）</a>
+
 ## 开始
 
 需要 **Node.js 22 以上**，以及下面至少一个：

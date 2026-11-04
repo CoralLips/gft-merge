@@ -15,7 +15,7 @@ You plan something in one Claude Code session, build it in Codex, and debug it i
 
 It runs on your computer and opens in your browser. A sibling of [GFT-Map](https://github.com/CoralLips/gft-map).
 
-> The interface is in Chinese for now.
+Choose **中文** or **EN** under **Settings → Language**. Your browser remembers your choice.
 
 ## Get started
 
@@ -47,7 +47,7 @@ The page has two halves. At the top, one column per tool lists your sessions fro
 
 **The number in a ball** is its size in tokens. A single session shows that session's own context size, read from the tool's records. A fused or compressed ball shows what dragging it up would send, counted locally (marked ≈).
 
-**Compression** sends the ball's content to the tool and model chosen under **Settings → 处理工具** (processing tool) and replaces it with the result. While it runs, the ball's ring turns and its name reads "压缩中…" (compressing). A compressed ball can't be split again; you can fuse more sessions onto it or compress it again. Drag it up before compression finishes and the original text is sent.
+**Compression** sends the ball's content to the tool and model chosen under **Settings → Compression tool and model** and replaces it with the result. While it runs, the ball's ring turns and its name reads "压缩中…" (compressing). A compressed ball can't be split again; you can fuse more sessions onto it or compress it again. Drag it up before compression finishes and the original text is sent.
 
 **The new session's first message** contains the plain conversation of every session in the ball (your messages and the final answer of each turn, without tool output) and asks the AI to open with its assessment, show a table of each work item, its status and what is missing, then suggest next steps in order and wait for you. That reply is a real turn, so the session sits at the top of the tool's list. With Codex the page returns at once and the session opens when the reply ends; with Claude the page waits for the reply (several seconds to about a minute), then the session opens in the Claude app.
 

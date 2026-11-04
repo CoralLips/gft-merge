@@ -329,7 +329,7 @@ body.carrying-up .bucket::after {
   outline: 1.5px solid var(--ink);
 }
 .pool-item.target::after {
-  content: '松手：移到这个池子';
+  content: attr(data-drop);
   position: absolute;
   inset: 0;
   align-items: center;

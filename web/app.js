@@ -4,6 +4,7 @@
 // another fuses into it, and a click compresses it. Dragging a ball up starts
 // a session with exactly what it holds. Every change shows at once; the server
 // follows, and a failure reloads the saved state.
+const { pick: t, localizedError } = mergeLanguage;
 const $ = selector => document.querySelector(selector);
 const el = (tag, { dataset, ...props } = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), props);
@@ -57,7 +58,7 @@ async function api(method, url, body) {
     body: write ? JSON.stringify(body ?? {}) : undefined,
   });
   const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value.error || `请求失败（${response.status}）`);
+  if (!response.ok) throw new Error(value.error || t(`请求失败（${response.status}）`, `Request failed (${response.status})`));
   return value;
 }
 
@@ -78,7 +79,7 @@ async function commit(run, done) {
     if (message) toast(message);
     return result;
   } catch (error) {
-    toast(error.message);
+    toast(localizedError(error.message));
     await loadPools();
     return null;
   }
@@ -87,9 +88,14 @@ async function commit(run, done) {
 function ago(iso) {
   if (!iso) return '';
   const minutes = Math.round((Date.now() - Date.parse(iso)) / 60000);
-  if (minutes < 60) return `${Math.max(minutes, 1)} 分钟前`;
-  if (minutes < 1440) return `${Math.round(minutes / 60)} 小时前`;
-  return `${Math.round(minutes / 1440)} 天前`;
+  if (minutes < 60) {
+    const n = Math.max(minutes, 1);
+    return t(`${n} 分钟前`, `${n} minute${n === 1 ? '' : 's'} ago`);
+  }
+  const hours = Math.round(minutes / 60);
+  if (minutes < 1440) return t(`${hours} 小时前`, `${hours} hour${hours === 1 ? '' : 's'} ago`);
+  const days = Math.round(minutes / 1440);
+  return t(`${days} 天前`, `${days} day${days === 1 ? '' : 's'} ago`);
 }
 const project = cwd => (cwd ? cwd.split(/[\\/]/).filter(Boolean).at(-1) : '');
 
@@ -118,7 +124,7 @@ function renderTools() {
           state.busy.has(tool.id) ? el('span', { className: 'spinner' }) : null,
           el('span', {
             className: 'count',
-            textContent: loaded && !state.unavailable[tool.id] ? `${sessions.length} 个会话` : '',
+            textContent: loaded && !state.unavailable[tool.id] ? t(`${sessions.length} 个会话`, `${sessions.length} session${sessions.length === 1 ? '' : 's'}`) : '',
           }),
         );
         const rows = sessions.map(item =>
@@ -142,7 +148,7 @@ function renderTools() {
           // The whole bucket is the drop target: let go anywhere on it to start a session there.
           {
             className: 'bucket',
-            dataset: { drop: `松手：在 ${tool.name} 新建会话`, tool: tool.id },
+            dataset: { drop: t(`松手：在 ${tool.name} 新建会话`, `Release to start a session in ${tool.name}`), tool: tool.id },
           },
           header,
           el(
@@ -152,7 +158,9 @@ function renderTools() {
               ? rows
               : el('li', {
                   className: 'empty',
-                  textContent: !loaded ? '读取中…' : state.unavailable[tool.id] || '最近没有会话',
+                  textContent: !loaded ? t('读取中…', 'Loading…') : state.unavailable[tool.id]
+                    ? `${localizedError(state.unavailable[tool.id])} ${t('不用这个工具的话，可以在右上角设置里关掉这一栏。', 'You can hide this tool in Settings.')}`
+                    : t('最近没有会话', 'No recent sessions'),
                 }),
           ),
         );
@@ -245,9 +253,9 @@ const sourceNodes = item => [
   }),
   ` · ${item.title}`,
 ];
-/** Several names, separated by 、 */
+/** A list of session names; the names themselves always keep their original language. */
 const sourceList = items =>
-  items.flatMap((item, i) => [...(i ? ['、'] : []), ...sourceNodes(item)]);
+  items.flatMap((item, i) => [...(i ? [t('、', ', ')] : []), ...sourceNodes(item)]);
 const chip = item => el('span', { className: 'chip' }, ...sourceNodes(item));
 
 // ---- Balls: hollow vector circles with their size in the middle ----
@@ -278,7 +286,7 @@ function sizeOf(b) {
 }
 /** The names of the sessions a ball holds, compacted ones included; the label cuts them short. */
 const sourcesOf = b => [...b.compacts.flatMap(c => c.from), ...b.sessions];
-const nameOf = b => sourcesOf(b).map(sourceName).join('、');
+const nameOf = b => sourcesOf(b).map(sourceName).join(t('、', ', '));
 function ballSvg(r, { spinning = false, label = '' } = {}) {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('width', 2 * r + 4);
@@ -389,7 +397,7 @@ function renderWorkspace() {
       el('div', {
         className: 'slot',
         style: `left:${g.rect.width / 2}px;top:${g.rect.height / 2}px`,
-        textContent: '把上面的会话拖到这里；把一个球拖到另一个球上＝融合',
+        textContent: t('把上面的会话拖到这里；把一个球拖到另一个球上＝融合', 'Drag sessions here. Drop one ball onto another to merge.'),
       }),
     );
   // A ball without a valid free cell (new, or after a resize) gets the nearest one.
@@ -406,7 +414,7 @@ function renderWorkspace() {
     const svg = ballSvg(r, { spinning, label: sizeOf(b) });
     svg.addEventListener('pointerdown', e => carryBall(e, b, node));
     const name = spinning
-      ? el('span', { className: 'label compressing', textContent: '压缩中…' })
+      ? el('span', { className: 'label compressing', textContent: t('压缩中…', 'Compressing…') })
       : el('span', { className: 'label', title: nameOf(b) }, ...sourceList(sourcesOf(b)));
     const parts = membersOf(b) > 1 || b.compacts.length ? composition(b) : null;
     const node = el(
@@ -416,7 +424,7 @@ function renderWorkspace() {
         className: c.y > g.rect.height / 2 ? 'orb up' : 'orb',
         dataset: { ball: b.id },
         style: `left:${c.x}px;top:${c.y}px;--r:${r}px`,
-        title: spinning ? '压缩中…' : '点一下＝压缩；拖到另一个球上＝融合；往上拖＝新建会话',
+        title: spinning ? t('压缩中…', 'Compressing…') : t('点一下＝压缩；拖到另一个球上＝融合；往上拖＝新建会话', 'Click to compress. Drop on another ball to merge. Drag up to start a session.'),
       },
       svg,
       el('div', { className: 'name', style: `max-width:${g.w - 12}px` }, name, parts),
@@ -433,8 +441,8 @@ function composition(b) {
     ...b.compacts.map(compact =>
       el(
         'div',
-        { className: 'part sealed', title: '已压缩，不能拆开' },
-        '已压缩 · ',
+        { className: 'part sealed', title: t('已压缩，不能拆开', 'Compressed sessions cannot be split') },
+        t('已压缩 · ', 'Compressed · '),
         ...sourceList(compact.from),
         el('span', { className: 'meta', textContent: ` ${short(compact.tokens)}` }),
       ),
@@ -444,7 +452,7 @@ function composition(b) {
         'div',
         {
           className: 'part',
-          title: '拖出去＝拆开；拖到另一个球上＝移过去；往上拖＝只用这一段新建会话',
+          title: t('拖出去＝拆开；拖到另一个球上＝移过去；往上拖＝只用这一段新建会话', 'Drag out to split. Drop on another ball to move. Drag up to start a session with just this part.'),
         },
         chip(session),
         Number.isFinite(session.context)
@@ -527,7 +535,7 @@ async function injectInto(target, ballId, source) {
   );
   state.busy.delete(tool);
   await loadPools();
-  if (result?.status === 'nothing-new') toast('这个球里没有内容');
+  if (result?.status === 'nothing-new') toast(t('这个球里没有内容', 'This ball is empty.'));
   if (result?.status !== 'sent') {
     renderTools();
     return pulse(tool, 'shake');
@@ -611,7 +619,7 @@ function carryBall(event, b, node) {
         render();
         return commit(
           () => api('POST', poolPath('move'), { ball: b.id, to: target.dataset.id }),
-          () => `已把「${nameOf(b)}」移到另一个池子`,
+          () => t(`已把「${nameOf(b)}」移到另一个池子`, `Moved “${nameOf(b)}” to another pool`),
         ).then(loadPools);
       }
       if (target) {
@@ -623,7 +631,7 @@ function carryBall(event, b, node) {
       render();
       commit(
         () => api('DELETE', poolPath('balls', b.id)),
-        () => `已移出「${nameOf(b)}」`,
+        () => t(`已移出「${nameOf(b)}」`, `Removed “${nameOf(b)}” from the pool`),
       ).then(adopt);
     },
   });
@@ -677,7 +685,7 @@ function carryPart(event, b, session) {
       render();
       commit(
         () => api('DELETE', poolPath('sessions', encodeURIComponent(key))),
-        () => `已移出「${session.title}」`,
+        () => t(`已移出「${session.title}」`, `Removed “${session.title}” from the pool`),
       ).then(adopt);
     },
   });
@@ -709,7 +717,7 @@ $('#rail').addEventListener('pointerdown', event => {
       if (!inside($('#workspace'), e)) return;
       let pool = selected();
       if (pool?.balls.some(b => b.sessions.some(s => keyOf(s) === keyOf(item))))
-        return toast('这段会话已经在池子里');
+        return toast(t('这段会话已经在池子里', 'This session is already in the pool.'));
       if (!pool) {
         // A new pool appears at once; the server confirms it.
         pool = { id: `local-${Date.now()}`, name: item.title, balls: [] };
@@ -752,7 +760,7 @@ function renderList() {
         'li',
         {
           className: `pool-item${pool.id === state.selectedId ? ' selected' : ''}`,
-          dataset: { id: pool.id },
+          dataset: { id: pool.id, drop: t('松手：移到这个池子', 'Release to move to this pool') },
           onclick: () => select(pool.id),
         },
         name,
@@ -763,7 +771,7 @@ function renderList() {
         el('button', {
           className: 'edit',
           textContent: '✎',
-          title: '改名',
+          title: t('改名', 'Rename'),
           onclick: e => {
             e.stopPropagation();
             // The name itself becomes editable in place: Enter keeps it, Escape or an empty name drops it.
@@ -794,16 +802,16 @@ function renderList() {
         el('button', {
           className: 'edit',
           textContent: '×',
-          title: '删除池子',
+          title: t('删除池子', 'Delete pool'),
           onclick: e => {
             e.stopPropagation();
-            if (!confirm(`删除池子「${pool.name}」？会话本身不受影响。`)) return;
+            if (!confirm(t(`删除池子「${pool.name}」？会话本身不受影响。`, `Delete pool “${pool.name}”? Its original sessions will be kept.`))) return;
             state.pools = state.pools.filter(p => p.id !== pool.id);
             if (state.selectedId === pool.id) state.selectedId = state.pools[0]?.id ?? null;
             render();
             commit(
               () => api('DELETE', `/api/pools/${pool.id}`),
-              () => `已删除「${pool.name}」`,
+              () => t(`已删除「${pool.name}」`, `Deleted “${pool.name}”`),
             );
           },
         }),
@@ -817,7 +825,7 @@ function select(id) {
   render();
 }
 $('#add-pool').onclick = async () => {
-  const created = await commit(() => api('POST', '/api/pools', { name: '新池子' }));
+  const created = await commit(() => api('POST', '/api/pools', { name: t('新池子', 'New pool') }));
   if (!created) return;
   state.pools.unshift(created);
   select(created.id);
@@ -825,21 +833,23 @@ $('#add-pool').onclick = async () => {
 
 // ---- Settings: the gear menu at the top right ----
 const THEMES = [
-  ['light', '浅色'],
-  ['dark', '深色'],
-  ['system', '跟随系统'],
+  ['light', '浅色', 'Light'],
+  ['dark', '深色', 'Dark'],
+  ['system', '跟随系统', 'System'],
 ];
 function applyTheme(theme) {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
 }
 function renderMenu() {
+  for (const button of $('#language-group').children)
+    button.setAttribute('aria-pressed', String(button.dataset.lang === t('zh', 'en')));
   const theme = store.get('gft-merge:theme') || 'system';
   $('#theme-group').replaceChildren(
-    ...THEMES.map(([value, label]) =>
+    ...THEMES.map(([value, zh, en]) =>
       el('button', {
         type: 'button',
-        textContent: label,
+        textContent: t(zh, en),
         ariaPressed: String(value === theme),
         onclick: () => {
           store.set('gft-merge:theme', value);
@@ -871,7 +881,7 @@ function renderProcessor() {
   const select = $('#processor');
   const current = state.processor ? `${state.processor.tool}|${state.processor.model}` : '';
   if (!state.processors) {
-    select.replaceChildren(el('option', { textContent: '读取中…' }));
+    select.replaceChildren(el('option', { textContent: t('读取中…', 'Loading…') }));
     return;
   }
   select.replaceChildren(
@@ -882,7 +892,7 @@ function renderProcessor() {
         ...item.models.map(model =>
           el('option', {
             value: `${item.tool}|${model.id}`,
-            textContent: `${item.name} · ${model.name}`,
+            textContent: `${item.name} · ${t(model.name, model.name.replace(/^默认（(.+)）$/, 'Default ($1)'))}`,
             selected: `${item.tool}|${model.id}` === current,
           }),
         ),
@@ -941,14 +951,23 @@ async function loadSessions() {
           delete state.unavailable[tool.id];
         } catch (error) {
           state.sessions[tool.id] = [];
-          state.unavailable[tool.id] =
-            `${error.message}不用这个工具的话，可以在右上角设置里关掉这一栏。`;
+          state.unavailable[tool.id] = error.message;
         }
       }),
   );
   if (!state.dragging) renderTools();
 }
 
+$('#language-group').addEventListener('click', event => {
+  const button = event.target.closest('button[data-lang]');
+  if (!button) return;
+  mergeLanguage.set(button.dataset.lang);
+  $('#toast').classList.remove('show');
+  renderMenu();
+  renderProcessor();
+  render();
+});
+renderMenu();
 const initial = await api('GET', '/api/state');
 state.tools = initial.tools;
 state.enabled = initial.settings.tools;
