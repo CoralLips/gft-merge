@@ -5,9 +5,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { turnMessages, createCodexTool } from '../tools/codex.mjs';
 import { condense, createClaudeTool } from '../tools/claude.mjs';
-import { MARKER } from '../home.mjs';
+import { BRIEF, MARKER } from '../home.mjs';
 
 const temporary = prefix => mkdtemp(path.join(tmpdir(), prefix));
+
+test('首轮交接按判断、状态表和后续安排的顺序展开', () => {
+  assert.deepEqual(BRIEF.match(/^### .+$/gm), [
+    '### 一、我接手后的判断',
+    '### 二、现在各项工作走到哪里',
+    '### 三、后续建议，按这个顺序接',
+  ]);
+  assert.ok(BRIEF.includes('「工作」「已到哪」「还缺什么」'));
+});
 
 test('Codex 每轮只留用户的话和最终回答，进行中的轮次不读', () => {
   const turn = {
@@ -278,7 +287,7 @@ test('Codex 新建：用默认模型开会话、起名、发出第一条；不�
     ['model/list', 'thread/start', 'thread/name/set', 'turn/start'],
   );
   assert.equal(codex.requests[1][1].model, 'gpt-test');
-  assert.match(codex.requests[3][1].input[0].text, /内容[\s\S]*汇报你的理解[\s\S]*等我的指示/);
+  assert.equal(codex.requests[3][1].input[0].text, `${MARKER}内容${BRIEF}`);
   assert.equal(created.session.id, 'new-thread');
   assert.equal(created.session.title, 'merge · 交接');
   assert.equal(codex.closed(), 0, '回复没结束前不能断开，否则回复会被打断');
@@ -309,7 +318,7 @@ test('Claude 新建走 SDK 的一轮对话：起好名字，再用桌面端的�
     text: `${MARKER}内容`,
   });
   assert.equal(created.session.id, 'c-new');
-  assert.match(calls[0].prompt, /内容[\s\S]*汇报你的理解[\s\S]*等我的指示/);
+  assert.equal(calls[0].prompt, `${MARKER}内容${BRIEF}`);
   assert.equal(calls[0].options.cwd, 'D:/work');
   assert.ok(!('CLAUDECODE' in calls[0].options.env), '不沿用父会话的环境');
   assert.deepEqual(renamed, [['c-new', 'merge · 交接']]);
